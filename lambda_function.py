@@ -9,15 +9,15 @@ import time
 import random
 from collections import OrderedDict
 
-appId = "970CA35de60c44645bbae8a215061b33"
-appCertificate = "5CFd2fd1755d40ecb72977518be15d3b"
+appId = "0eb825fdf2e04792a458f86b259f95d7"
+appCertificate = "6f3fbd4ca5244b0fb1a19f2974d97746"
 
 VERSION_LENGTH = 3
 APP_ID_LENGTH = 32
 
 def lambda_handler(event, context):
-    channel = ""
     
+    channel = ""
     if ('queryStringParameters' in event and 'channel' in event['queryStringParameters']) :
         channel=event['queryStringParameters']['channel'] 
     else:
@@ -29,13 +29,18 @@ def lambda_handler(event, context):
         "body": "channel not found"
         }
 
+    uid = ""
+    if ('queryStringParameters' in event and 'uid' in event['queryStringParameters']) :
+        uid=event['queryStringParameters']['uid'] 
+    else:  
+        uid = random.randint(100000000, 999999999)
+        
     return {
         'statusCode': 200,
-        'body': get_token(channel)
+        'body': get_token(channel,uid)
     }
 
-def get_token(channel):
-    uid =  random.randint(100000000, 999999999);
+def get_token(channel, uid):
     token = AccessToken(appId, appCertificate, channel, uid)
     return {"token": token.build(), "uid": uid}
         
@@ -169,5 +174,3 @@ class AccessToken:
         version = getVersion()
         ret = version + self.appID + base64.b64encode(content).decode('utf-8')
         return ret
-
-
