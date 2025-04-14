@@ -10,11 +10,13 @@ import random
 from collections import OrderedDict
 import urllib.parse
 import http.client
+import os
+
 
 # Constants for Agora
-APP_ID = ""
-APP_CERTIFICATE = "" # or empty if security disabled
-AGENT_AUTH_HEADER = "Basic AAAAAAA"
+APP_ID = os.environ.get('APP_ID')
+APP_CERTIFICATE = os.environ.get('APP_CERTIFICATE')
+AGENT_AUTH_HEADER = os.environ.get('AGENT_AUTH_HEADER')
 AGENT_API_BASE_URL = "https://api.agora.io/api/conversational-ai-agent/v2/projects"
 
 # Fixed UIDs
@@ -26,15 +28,15 @@ VERSION_LENGTH = 3
 APP_ID_LENGTH = 32
 
 # Define LLM settings
-LLM_URL = ""
-LLM_API_KEY = ""
-LLM_MODEL = ""
+LLM_URL = os.environ.get('LLM_URL')
+LLM_API_KEY = os.environ.get('LLM_API_KEY')
+LLM_MODEL = os.environ.get('LLM_MODEL')
 
 # Define TTS settings
-TTS_VENDOR = "elevenlabs"
-TTS_KEY = ""
-TTS_MODEL = "eleven_flash_v2_5"
-TTS_VOICE_ID = "cgSgspJ2msm6clMCkdW9"
+TTS_VENDOR = os.environ.get('TTS_VENDOR')
+TTS_KEY = os.environ.get('TTS_KEY')
+TTS_MODEL = os.environ.get('TTS_MODEL')
+TTS_VOICE_ID = os.environ.get('TTS_VOICE_ID')
 
 # Define ASR settings
 ASR_LANGUAGE = "en-US"
