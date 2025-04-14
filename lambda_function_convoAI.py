@@ -12,9 +12,9 @@ import urllib.parse
 import http.client
 
 # Constants for Agora
-APP_ID = "0ee04792a45859f95d7"
-APP_CERTIFICATE = "6f3fb0fb1a19f29746" # or empty if security disabled
-AGENT_AUTH_HEADER = "Basic NzViOGUyDMwNGE2Y2E2MzYwMGRhYTkyMWQwMjk="
+APP_ID = ""
+APP_CERTIFICATE = "" # or empty if security disabled
+AGENT_AUTH_HEADER = "Basic AAAAAAA"
 AGENT_API_BASE_URL = "https://api.agora.io/api/conversational-ai-agent/v2/projects"
 
 # Fixed UIDs
@@ -26,13 +26,13 @@ VERSION_LENGTH = 3
 APP_ID_LENGTH = 32
 
 # Define LLM settings
-LLM_URL = "https://api.x.ai/v1/chat/completions"
-LLM_API_KEY = "xai-aBXOPgZPtaWgCSxbmS4ywat9UvzI2Pmk2sxNlYze1fKhuJFwH5z3As275gp6m1AYLzMMtqxazooj3g4m"
-LLM_MODEL = "grok-2-1212"
+LLM_URL = ""
+LLM_API_KEY = ""
+LLM_MODEL = ""
 
 # Define TTS settings
 TTS_VENDOR = "elevenlabs"
-TTS_KEY = "e67f1b2746856cb18ecaf04233613ddf"
+TTS_KEY = ""
 TTS_MODEL = "eleven_flash_v2_5"
 TTS_VOICE_ID = "cgSgspJ2msm6clMCkdW9"
 
