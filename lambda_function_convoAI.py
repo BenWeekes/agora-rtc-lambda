@@ -19,9 +19,9 @@ APP_CERTIFICATE = os.environ.get('APP_CERTIFICATE')
 AGENT_AUTH_HEADER = os.environ.get('AGENT_AUTH_HEADER')
 AGENT_API_BASE_URL = "https://api.agora.io/api/conversational-ai-agent/v2/projects"
 
-# Fixed UIDs
-AGENT_UID = 110
-USER_UID = 111
+# Fixed UIDs as strings
+AGENT_UID = "agent"
+USER_UID = "user"
 
 # Constants for token generation
 VERSION_LENGTH = 3
@@ -49,38 +49,39 @@ DEFAULT_GREETING = "hi there"
 def lambda_handler(event, context):
     """
     Lambda handler function that processes the incoming request, generates tokens,
-    and sends an agent to the channel.
+    and sends an agent to the channel or handles hangup requests.
     """
+    # Check if queryStringParameters exists
+    if 'queryStringParameters' not in event or event['queryStringParameters'] is None:
+        return json_response(400, {"error": "Missing query parameters"})
+    
+    query_params = event['queryStringParameters']
+    
+    # Check for hangup request
+    if 'hangup' in query_params and query_params['hangup'].lower() == 'true':
+        # Hangup flow
+        if 'agent_id' not in query_params:
+            return json_response(400, {"error": "Missing agent_id parameter for hangup"})
+        
+        agent_id = query_params['agent_id']
+        hangup_response = hangup_agent(agent_id)
+        
+        return json_response(200, {
+            "agent_response": hangup_response
+        })
+    
+    # Normal join flow
     # Get channel from query parameters
-    channel = ""
-    if ('queryStringParameters' in event and 'channel' in event['queryStringParameters']):
-        channel = event['queryStringParameters']['channel'] 
-    else:
-        return {
-            "isBase64Encoded": False,
-            "statusCode": 403,
-            "headers": {"Content-Type": "application/json"},
-            "multiValueHeaders": {},
-            "body": "channel not found"
-        }
+    if 'channel' not in query_params:
+        return json_response(400, {"error": "Missing channel parameter"})
+    
+    channel = query_params['channel']
     
     # Get optional prompt, greeting, voice_id, and debug parameters
-    prompt = DEFAULT_PROMPT
-    greeting = DEFAULT_GREETING
-    voice_id = TTS_VOICE_ID
-    debug_mode = False
-    
-    if ('queryStringParameters' in event and 'prompt' in event['queryStringParameters']):
-        prompt = event['queryStringParameters']['prompt']
-        
-    if ('queryStringParameters' in event and 'greeting' in event['queryStringParameters']):
-        greeting = event['queryStringParameters']['greeting']
-        
-    if ('queryStringParameters' in event and 'voice_id' in event['queryStringParameters']):
-        voice_id = event['queryStringParameters']['voice_id']
-        
-    if ('queryStringParameters' in event and 'debug' in event['queryStringParameters']):
-        debug_mode = True
+    prompt = query_params.get('prompt', DEFAULT_PROMPT)
+    greeting = query_params.get('greeting', DEFAULT_GREETING)
+    voice_id = query_params.get('voice_id', TTS_VOICE_ID)
+    debug_mode = 'debug' in query_params
     
     # Get token for user
     user_token_data = get_token(channel, USER_UID)
@@ -90,24 +91,90 @@ def lambda_handler(event, context):
     
     # In debug mode, return the agent payload instead of sending the agent
     if debug_mode:
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                "user_token": user_token_data,
-                "agent_payload": agent_payload
-            })
-        }
+        return json_response(200, {
+            "user_token": user_token_data,
+            "agent_payload": agent_payload
+        })
     
     # Not in debug mode, send the agent to the channel
     agent_response = send_agent_to_channel(channel, agent_payload)
     
+    return json_response(200, {
+        "user_token": user_token_data,
+        "agent_response": agent_response
+    })
+
+def json_response(status_code, body):
+    """
+    Creates a properly formatted JSON response for API Gateway
+    
+    Args:
+        status_code: HTTP status code
+        body: Dictionary to be serialized to JSON
+        
+    Returns:
+        Dictionary formatted for API Gateway response
+    """
     return {
-        'statusCode': 200,
-        'body': json.dumps({
-            "user_token": user_token_data,
-            "agent_response": agent_response
-        })
+        "isBase64Encoded": False,
+        "statusCode": status_code,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(body)
     }
+
+def hangup_agent(agent_id):
+    """
+    Disconnects an agent from the channel by calling the leave API
+    
+    Args:
+        agent_id: The ID of the agent to disconnect
+        
+    Returns:
+        Dictionary with the status code, response body, and success flag
+    """
+    try:
+        # Construct the agent leave API URL
+        agent_leave_url = f"{AGENT_API_BASE_URL}/{APP_ID}/agents/{agent_id}/leave"
+        
+        # Parse the URL to get host and path
+        url_parts = urllib.parse.urlparse(agent_leave_url)
+        host = url_parts.netloc
+        path = url_parts.path
+        
+        # Use http.client directly
+        conn = http.client.HTTPSConnection(host)
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": AGENT_AUTH_HEADER
+        }
+        
+        conn.request("POST", path, "", headers)
+        
+        # Get the response
+        response = conn.getresponse()
+        status_code = response.status
+        response_text = response.read().decode('utf-8')
+        
+        # Log the response for debugging
+        print(f"Agent leave API response: {status_code} - {response_text}")
+        
+        conn.close()
+        
+        # Return a dictionary with the response details
+        return {
+            "status_code": status_code,
+            "response": response_text,
+            "success": status_code == 200
+        }
+    except Exception as e:
+        error_message = str(e)
+        print(f"Error disconnecting agent: {error_message}")
+        return {
+            "status_code": 500,
+            "response": json.dumps({"error": error_message}),
+            "success": False
+        }
 
 def get_token(channel, uid):
     """
@@ -149,9 +216,9 @@ def create_agent_payload(channel, prompt=DEFAULT_PROMPT, greeting=DEFAULT_GREETI
         "properties": {
             "channel": channel,
             "token": agent_token,
-            "agent_rtc_uid": str(AGENT_UID),
-            "remote_rtc_uids": ["*"],
-            "enable_string_uid": False,
+            "agent_rtc_uid": AGENT_UID,  # No str() conversion needed as it's already a string
+            "remote_rtc_uids": [USER_UID],  # Target the specific user UID
+            "enable_string_uid": True,  # Changed to True since we're using string UIDs
             "idle_timeout": 30,
             "llm": {
                 "url": LLM_URL,
@@ -240,7 +307,7 @@ def send_agent_to_channel(channel, agent_payload):
         print(f"Error sending agent to channel: {error_message}")
         return {
             "status_code": 500,
-            "response": f"Error: {error_message}",
+            "response": json.dumps({"error": error_message}),
             "success": False
         }
 
@@ -343,7 +410,7 @@ class AccessToken:
         self.ts = int(time.time()) + 24 * 3600
         self.salt = secrets.SystemRandom().randint(1, 99999999)
         self.messages = {}
-        if (uid == 0):
+        if uid == 0 or uid == "":
             self.uidStr = ""
         else:
             self.uidStr = str(uid)
