@@ -13,38 +13,91 @@ import http.client
 import os
 
 
+# Helper function to get environment variables with profile support
+def get_env_var(var_name, profile=None, default_value=None):
+    """
+    Gets an environment variable with profile support.
+    If profile is provided, it first checks for VAR_NAME_PROFILE.
+    If that doesn't exist, it falls back to VAR_NAME.
+    If that doesn't exist, it returns the default_value.
+    
+    Args:
+        var_name: The environment variable name
+        profile: Optional profile suffix
+        default_value: Default value if neither variable exists
+        
+    Returns:
+        The value of the environment variable or default_value
+    """
+    if profile:
+        profiled_var_name = f"{var_name}_{profile}"
+        profiled_value = os.environ.get(profiled_var_name)
+        if profiled_value is not None:
+            return profiled_value
+    
+    # Fall back to standard variable
+    value = os.environ.get(var_name)
+    if value is not None:
+        return value
+    
+    # Fall back to default value
+    return default_value
+
+
 # Constants for Agora
-APP_ID = os.environ.get('APP_ID')
-APP_CERTIFICATE = os.environ.get('APP_CERTIFICATE')
-AGENT_AUTH_HEADER = os.environ.get('AGENT_AUTH_HEADER')
-AGENT_API_BASE_URL = "https://api.agora.io/api/conversational-ai-agent/v2/projects"
-
-# Fixed UIDs as strings
-AGENT_UID = "agent"
-USER_UID = "user"
-
-# Constants for token generation
-VERSION_LENGTH = 3
-APP_ID_LENGTH = 32
-
-# Define LLM settings
-LLM_URL = os.environ.get('LLM_URL')
-LLM_API_KEY = os.environ.get('LLM_API_KEY')
-LLM_MODEL = os.environ.get('LLM_MODEL')
-
-# Define TTS settings
-TTS_VENDOR = os.environ.get('TTS_VENDOR')
-TTS_KEY = os.environ.get('TTS_KEY')
-TTS_MODEL = os.environ.get('TTS_MODEL')
-TTS_VOICE_ID = os.environ.get('TTS_VOICE_ID')
-
-# Define ASR settings
-ASR_LANGUAGE = "en-US"
-ASR_VENDOR = "deepgram"
-
-# Default values for prompt and greeting
-DEFAULT_PROMPT = "You are a helpful chatbot. Keep responses short."
-DEFAULT_GREETING = "hi there"
+def initialize_constants(profile=None):
+    """
+    Initialize all constants with profile support
+    
+    Args:
+        profile: Optional profile suffix for environment variables
+        
+    Returns:
+        Dictionary of constants
+    """
+    constants = {
+        "APP_ID": get_env_var('APP_ID', profile),
+        "APP_CERTIFICATE": get_env_var('APP_CERTIFICATE', profile, ''),
+        "AGENT_AUTH_HEADER": get_env_var('AGENT_AUTH_HEADER', profile),
+        "AGENT_API_BASE_URL": "https://api.agora.io/api/conversational-ai-agent/v2/projects",
+        
+        # Fixed UIDs as strings
+        "AGENT_UID": "agent",
+        "USER_UID": "user",
+        
+        # Constants for token generation
+        "VERSION_LENGTH": 3,
+        "APP_ID_LENGTH": 32,
+        
+        # Token expiration (in seconds)
+        "TOKEN_EXPIRE": 24 * 3600,  # 24 hours
+        "PRIVILEGE_EXPIRE": 24 * 3600,  # 24 hours
+        
+        # Define LLM settings
+        "LLM_URL": get_env_var('LLM_URL', profile),
+        "LLM_API_KEY": get_env_var('LLM_API_KEY', profile),
+        "LLM_MODEL": get_env_var('LLM_MODEL', profile),
+        
+        # Define TTS settings
+        "TTS_VENDOR": get_env_var('TTS_VENDOR', profile),
+        "TTS_KEY": get_env_var('TTS_KEY', profile),
+        "TTS_MODEL": get_env_var('TTS_MODEL', profile),
+        "TTS_VOICE_ID": get_env_var('TTS_VOICE_ID', profile),
+        
+        # Define ASR settings
+        "ASR_LANGUAGE": get_env_var('ASR_LANGUAGE', profile, "en-US"),
+        "ASR_VENDOR": get_env_var('ASR_VENDOR', profile, "deepgram"),
+        
+        # Default values for prompt and greeting
+        "DEFAULT_PROMPT": get_env_var('DEFAULT_PROMPT', profile, 
+            "You are a virtual companion. The user can both talk and type to you and you will be sent text. "
+            "Say you can hear them if asked. They can also see you as a digital human. "
+            "Keep responses to around 10 to 20 words or shorter. Be upbeat and try and keep conversation "
+            "going by learning more about the user. "),
+        "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there")
+    }
+    
+    return constants
 
 def lambda_handler(event, context):
     """
@@ -57,6 +110,12 @@ def lambda_handler(event, context):
     
     query_params = event['queryStringParameters']
     
+    # Get the optional profile parameter
+    profile = query_params.get('profile')
+    
+    # Initialize constants with profile
+    constants = initialize_constants(profile)
+    
     # Check for hangup request
     if 'hangup' in query_params and query_params['hangup'].lower() == 'true':
         # Hangup flow
@@ -64,7 +123,7 @@ def lambda_handler(event, context):
             return json_response(400, {"error": "Missing agent_id parameter for hangup"})
         
         agent_id = query_params['agent_id']
-        hangup_response = hangup_agent(agent_id)
+        hangup_response = hangup_agent(agent_id, constants)
         
         return json_response(200, {
             "agent_response": hangup_response
@@ -78,16 +137,19 @@ def lambda_handler(event, context):
     channel = query_params['channel']
     
     # Get optional prompt, greeting, voice_id, and debug parameters
-    prompt = query_params.get('prompt', DEFAULT_PROMPT)
-    greeting = query_params.get('greeting', DEFAULT_GREETING)
-    voice_id = query_params.get('voice_id', TTS_VOICE_ID)
+    prompt = query_params.get('prompt', constants["DEFAULT_PROMPT"])
+    greeting = query_params.get('greeting', constants["DEFAULT_GREETING"])
+    
+    # Get voice_id parameter or use default
+    voice_id = query_params.get('voice_id', constants["TTS_VOICE_ID"])
+    
     debug_mode = 'debug' in query_params
     
-    # Get token for user
-    user_token_data = get_token(channel, USER_UID)
+    # Get token for user with RTC and RTM capabilities
+    user_token_data = build_token_with_rtm(channel, constants["USER_UID"], constants)
     
     # Create agent payload for sending to the channel
-    agent_payload = create_agent_payload(channel, prompt, greeting, voice_id)
+    agent_payload = create_agent_payload(channel, constants, prompt, greeting, voice_id)
     
     # In debug mode, return the agent payload instead of sending the agent
     if debug_mode:
@@ -97,7 +159,16 @@ def lambda_handler(event, context):
         })
     
     # Not in debug mode, send the agent to the channel
-    agent_response = send_agent_to_channel(channel, agent_payload)
+    agent_response = send_agent_to_channel(channel, agent_payload, constants)
+    
+    # If the agent response indicates failure, return the error with a proper status code
+    if not agent_response.get("success"):
+        error_status = agent_response.get("status_code", 500)
+        return json_response(error_status, {
+            "user_token": user_token_data,
+            "agent_response": agent_response,
+            "error": f"Failed to send agent to channel. API returned status {error_status}."
+        })
     
     return json_response(200, {
         "user_token": user_token_data,
@@ -122,107 +193,135 @@ def json_response(status_code, body):
         "body": json.dumps(body)
     }
 
-def hangup_agent(agent_id):
+def hangup_agent(agent_id, constants):
     """
     Disconnects an agent from the channel by calling the leave API
     
     Args:
         agent_id: The ID of the agent to disconnect
+        constants: Dictionary of constants
         
     Returns:
         Dictionary with the status code, response body, and success flag
     """
-    try:
-        # Construct the agent leave API URL
-        agent_leave_url = f"{AGENT_API_BASE_URL}/{APP_ID}/agents/{agent_id}/leave"
-        
-        # Parse the URL to get host and path
-        url_parts = urllib.parse.urlparse(agent_leave_url)
-        host = url_parts.netloc
-        path = url_parts.path
-        
-        # Use http.client directly
-        conn = http.client.HTTPSConnection(host)
-        
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": AGENT_AUTH_HEADER
-        }
-        
-        conn.request("POST", path, "", headers)
-        
-        # Get the response
-        response = conn.getresponse()
-        status_code = response.status
-        response_text = response.read().decode('utf-8')
-        
-        # Log the response for debugging
-        print(f"Agent leave API response: {status_code} - {response_text}")
-        
-        conn.close()
-        
-        # Return a dictionary with the response details
-        return {
-            "status_code": status_code,
-            "response": response_text,
-            "success": status_code == 200
-        }
-    except Exception as e:
-        error_message = str(e)
-        print(f"Error disconnecting agent: {error_message}")
-        return {
-            "status_code": 500,
-            "response": json.dumps({"error": error_message}),
-            "success": False
-        }
+    # Construct the agent leave API URL
+    agent_leave_url = f"{constants['AGENT_API_BASE_URL']}/{constants['APP_ID']}/agents/{agent_id}/leave"
+    
+    # Parse the URL to get host and path
+    url_parts = urllib.parse.urlparse(agent_leave_url)
+    host = url_parts.netloc
+    path = url_parts.path
+    
+    # Use http.client directly with timeout
+    conn = http.client.HTTPSConnection(host, timeout=30)
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": constants["AGENT_AUTH_HEADER"]
+    }
+    
+    conn.request("POST", path, "", headers)
+    
+    # Get the response
+    response = conn.getresponse()
+    status_code = response.status
+    response_text = response.read().decode('utf-8')
+    
+    conn.close()
+    
+    # Return a dictionary with the response details
+    return {
+        "status_code": status_code,
+        "response": response_text,
+        "success": status_code == 200
+    }
 
-def get_token(channel, uid):
+def build_token_with_rtm(channel_name, account, constants):
     """
-    Generates a token for the given channel and uid.
-    If APP_CERTIFICATE is empty, returns APP_ID as the token.
+    Builds a token with both RTC and RTM privileges, similar to the Go example.
     
     Args:
-        channel: The channel name
-        uid: The user's UID
+        channel_name: The channel name
+        account: The user's account/UID
+        constants: Dictionary of constants
     
     Returns:
         Dictionary containing token and uid
     """
     # Return APP_ID as token if APP_CERTIFICATE is empty
-    if not APP_CERTIFICATE:
-        return {"token": APP_ID, "uid": uid}
+    if not constants["APP_CERTIFICATE"]:
+        return {"token": constants["APP_ID"], "uid": account}
     
-    token = AccessToken(APP_ID, APP_CERTIFICATE, channel, uid)
-    return {"token": token.build(), "uid": uid}
+    # For this implementation, we'll continue using the AccessToken class from the original code
+    # but add both RTC and RTM privileges
+    token = AccessToken(constants["APP_ID"], constants["APP_CERTIFICATE"], channel_name, account)
+    
+    # RTC privileges - for channel
+    # 1: Join Channel
+    token.addPrivilege(1, constants["PRIVILEGE_EXPIRE"])
+    # 2: Publish Audio
+    token.addPrivilege(2, constants["PRIVILEGE_EXPIRE"])
+    # 3: Publish Video
+    token.addPrivilege(3, constants["PRIVILEGE_EXPIRE"])
+    # 4: Publish Data Stream
+    token.addPrivilege(4, constants["PRIVILEGE_EXPIRE"])
+    
+    # RTM privilege - for login
+    # 1000: RTM Login
+    token.addPrivilege(1000, constants["TOKEN_EXPIRE"])
+    
+    return {"token": token.build(), "uid": account}
 
-def create_agent_payload(channel, prompt=DEFAULT_PROMPT, greeting=DEFAULT_GREETING, voice_id=TTS_VOICE_ID):
+def create_agent_payload(channel, constants, prompt=None, greeting=None, voice_id=None):
     """
     Creates the payload for the agent to be sent to the Agora RTC channel
     
     Args:
         channel: The channel name
-        prompt: System prompt for the LLM (defaults to DEFAULT_PROMPT)
-        greeting: Greeting message (defaults to DEFAULT_GREETING)
-        voice_id: Voice ID for TTS (defaults to TTS_VOICE_ID)
+        constants: Dictionary of constants
+        prompt: System prompt for the LLM (defaults to constants["DEFAULT_PROMPT"])
+        greeting: Greeting message (defaults to constants["DEFAULT_GREETING"])
+        voice_id: Voice ID for TTS (defaults to constants["TTS_VOICE_ID"])
     
     Returns:
         Dictionary containing the agent payload
     """
-    # Get token for agent
-    agent_token = get_token(channel, AGENT_UID)["token"]
+    # Use provided values or defaults from constants
+    if prompt is None:
+        prompt = constants["DEFAULT_PROMPT"]
+    if greeting is None:
+        greeting = constants["DEFAULT_GREETING"]
+    if voice_id is None:
+        voice_id = constants["TTS_VOICE_ID"]
+    
+    # Get token for agent with RTM privileges
+    agent_token = build_token_with_rtm(channel, constants["AGENT_UID"], constants)["token"]
+    
+    # Define advanced features with enable_aivad hardcoded to true
+    advanced_features = {
+        "enable_bhvs": True,
+        "enable_rtm": True,
+        "enable_aivad": True
+    }
     
     agent_payload = {
+        "graph_id": "1.3.1-123-g17c1156",
         "name": channel,  # Use channel as the agent name
+        "parameters": {
+            "enable_error_message": True
+        },
         "properties": {
             "channel": channel,
             "token": agent_token,
-            "agent_rtc_uid": AGENT_UID,  # No str() conversion needed as it's already a string
-            "remote_rtc_uids": [USER_UID],  # Target the specific user UID
+            "agent_rtc_uid": constants["AGENT_UID"],
+            "agent_rtm_uid": constants["AGENT_UID"],
+            "remote_rtc_uids": [constants["USER_UID"]],  # Target the specific user UID
+            "advanced_features": advanced_features,
             "enable_string_uid": True,  # Changed to True since we're using string UIDs
             "idle_timeout": 30,
             "llm": {
-                "url": LLM_URL,
-                "api_key": LLM_API_KEY,
+                "url": constants["LLM_URL"],
+                "api_key": constants["LLM_API_KEY"],
                 "system_messages": [
                     {
                         "role": "system",
@@ -230,23 +329,29 @@ def create_agent_payload(channel, prompt=DEFAULT_PROMPT, greeting=DEFAULT_GREETI
                     }
                 ],
                 "greeting_message": greeting,
-                "failure_message": "Sorry, I don't know how to answer this question.",
+                "failure_message": "Sorry but can't talk just now.",
                 "max_history": 3,
                 "params": {
-                    "model": LLM_MODEL,
+                    "model": constants["LLM_MODEL"],
                     "stream": True
                 }
             },
+            "vad": {
+                "silence_duration_ms": 300
+            },
             "asr": {
-                "language": ASR_LANGUAGE,
-                "vendor": ASR_VENDOR
+                "language": constants["ASR_LANGUAGE"],
+                "vendor": constants["ASR_VENDOR"]
             },
             "tts": {
-                "vendor": TTS_VENDOR,
+                "vendor": constants["TTS_VENDOR"],
                 "params": {
-                    "key": TTS_KEY,
-                    "model_id": TTS_MODEL,
-                    "voice_id": voice_id
+                    "key": constants["TTS_KEY"],
+                    "model_id": constants["TTS_MODEL"],
+                    "voice_id": voice_id,
+                    "stability": 1, 
+                    "speed": 0.90,
+                    "sample_rate": 24000
                 }
             }
         }
@@ -254,62 +359,57 @@ def create_agent_payload(channel, prompt=DEFAULT_PROMPT, greeting=DEFAULT_GREETI
     
     return agent_payload
 
-def send_agent_to_channel(channel, agent_payload):
+def send_agent_to_channel(channel, agent_payload, constants):
     """
     Sends an agent to the specified Agora RTC channel by calling the REST API
     
     Args:
         channel: The channel name
         agent_payload: The complete agent payload to send
+        constants: Dictionary of constants
     
     Returns:
         Dictionary with the status code, response body, and success flag
     """
+    # Construct the agent API URL
+    agent_api_url = f"{constants['AGENT_API_BASE_URL']}/{constants['APP_ID']}/join"
+    
+    # Parse the URL to get host and path
+    url_parts = urllib.parse.urlparse(agent_api_url)
+    host = url_parts.netloc
+    path = url_parts.path
+    
+    # Use http.client directly with timeout
+    conn = http.client.HTTPSConnection(host, timeout=30)  # 30 second timeout
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": constants["AGENT_AUTH_HEADER"]
+    }
+    
+    payload_json = json.dumps(agent_payload)
+    
+    conn.request("POST", path, payload_json, headers)
+    
+    # Get the response
+    response = conn.getresponse()
+    status_code = response.status
+    response_text = response.read().decode('utf-8')
+    
+    # Try to parse the response as JSON
     try:
-        # Construct the agent API URL
-        agent_api_url = f"{AGENT_API_BASE_URL}/{APP_ID}/join"
-        
-        # Parse the URL to get host and path
-        url_parts = urllib.parse.urlparse(agent_api_url)
-        host = url_parts.netloc
-        path = url_parts.path
-        
-        # Use http.client directly
-        conn = http.client.HTTPSConnection(host)
-        
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": AGENT_AUTH_HEADER
-        }
-        
-        payload_json = json.dumps(agent_payload)
-        
-        conn.request("POST", path, payload_json, headers)
-        
-        # Get the response
-        response = conn.getresponse()
-        status_code = response.status
-        response_text = response.read().decode('utf-8')
-        
-        # Log the response for debugging
-        print(f"Agent API response: {status_code} - {response_text}")
-        
-        conn.close()
-        
-        # Return a dictionary with the response details
-        return {
-            "status_code": status_code,
-            "response": response_text,
-            "success": status_code == 200
-        }
-    except Exception as e:
-        error_message = str(e)
-        print(f"Error sending agent to channel: {error_message}")
-        return {
-            "status_code": 500,
-            "response": json.dumps({"error": error_message}),
-            "success": False
-        }
+        response_json = json.loads(response_text)
+    except json.JSONDecodeError:
+        pass
+    
+    conn.close()
+    
+    # Return a dictionary with the response details
+    return {
+        "status_code": status_code,
+        "response": response_text,
+        "success": status_code == 200
+    }
 
 def getVersion():
     """Returns the version string for the token"""
