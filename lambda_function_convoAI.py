@@ -61,6 +61,9 @@ def initialize_constants(profile=None):
         "AGENT_AUTH_HEADER": get_env_var('AGENT_AUTH_HEADER', profile),
         "AGENT_API_BASE_URL": "https://api.agora.io/api/conversational-ai-agent/v2/projects",
         
+        # Optional graph ID - omitted if not present
+        "GRAPH_ID": get_env_var('GRAPH_ID', profile),
+        
         # Fixed UIDs as strings
         "AGENT_UID": "agent",
         "USER_UID": "user",
@@ -77,12 +80,16 @@ def initialize_constants(profile=None):
         "LLM_URL": get_env_var('LLM_URL', profile),
         "LLM_API_KEY": get_env_var('LLM_API_KEY', profile),
         "LLM_MODEL": get_env_var('LLM_MODEL', profile),
+        "LLM_PARAMS": get_env_var('LLM_PARAMS', profile),
         
         # Define TTS settings
         "TTS_VENDOR": get_env_var('TTS_VENDOR', profile),
         "TTS_KEY": get_env_var('TTS_KEY', profile),
         "TTS_MODEL": get_env_var('TTS_MODEL', profile),
         "TTS_VOICE_ID": get_env_var('TTS_VOICE_ID', profile),
+        "TTS_VOICE_STABILITY": get_env_var('TTS_VOICE_STABILITY', profile, "1"),
+        "TTS_VOICE_SPEED": get_env_var('TTS_VOICE_SPEED', profile, "0.9"),
+        "TTS_VOICE_SAMPLE_RATE": get_env_var('TTS_VOICE_SAMPLE_RATE', profile, "24000"),
         
         # Define ASR settings
         "ASR_LANGUAGE": get_env_var('ASR_LANGUAGE', profile, "en-US"),
@@ -92,7 +99,7 @@ def initialize_constants(profile=None):
         "DEFAULT_PROMPT": get_env_var('DEFAULT_PROMPT', profile, 
             "You are a virtual companion. The user can both talk and type to you and you will be sent text. "
             "Say you can hear them if asked. They can also see you as a digital human. "
-            "Keep responses to around 10 to 20 words or shorter. Be upbeat and try and keep conversation "
+            "Keep responses to around 10 to 30 words. Be upbeat and try and keep conversation "
             "going by learning more about the user. "),
         "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there")
     }
@@ -140,8 +147,14 @@ def lambda_handler(event, context):
     prompt = query_params.get('prompt', constants["DEFAULT_PROMPT"])
     greeting = query_params.get('greeting', constants["DEFAULT_GREETING"])
     
-    # Get voice_id parameter or use default
+    # Get voice parameters or use defaults
     voice_id = query_params.get('voice_id', constants["TTS_VOICE_ID"])
+    voice_stability = query_params.get('voice_stability', constants["TTS_VOICE_STABILITY"])
+    voice_speed = query_params.get('voice_speed', constants["TTS_VOICE_SPEED"])
+    voice_sample_rate = query_params.get('voice_sample_rate', constants["TTS_VOICE_SAMPLE_RATE"])
+    
+    # Also allow graph_id to be overridden via URL parameter
+    graph_id = query_params.get('graph_id', constants["GRAPH_ID"])
     
     debug_mode = 'debug' in query_params
     
@@ -149,7 +162,17 @@ def lambda_handler(event, context):
     user_token_data = build_token_with_rtm(channel, constants["USER_UID"], constants)
     
     # Create agent payload for sending to the channel
-    agent_payload = create_agent_payload(channel, constants, prompt, greeting, voice_id)
+    agent_payload = create_agent_payload(
+        channel, 
+        constants, 
+        prompt, 
+        greeting, 
+        voice_id, 
+        voice_stability,
+        voice_speed,
+        voice_sample_rate,
+        graph_id
+    )
     
     # In debug mode, return the agent payload instead of sending the agent
     if debug_mode:
@@ -272,7 +295,17 @@ def build_token_with_rtm(channel_name, account, constants):
     
     return {"token": token.build(), "uid": account}
 
-def create_agent_payload(channel, constants, prompt=None, greeting=None, voice_id=None):
+def create_agent_payload(
+    channel, 
+    constants, 
+    prompt=None, 
+    greeting=None, 
+    voice_id=None,
+    voice_stability=None,
+    voice_speed=None,
+    voice_sample_rate=None,
+    graph_id=None
+):
     """
     Creates the payload for the agent to be sent to the Agora RTC channel
     
@@ -282,6 +315,10 @@ def create_agent_payload(channel, constants, prompt=None, greeting=None, voice_i
         prompt: System prompt for the LLM (defaults to constants["DEFAULT_PROMPT"])
         greeting: Greeting message (defaults to constants["DEFAULT_GREETING"])
         voice_id: Voice ID for TTS (defaults to constants["TTS_VOICE_ID"])
+        voice_stability: Voice stability for TTS (defaults to constants["TTS_VOICE_STABILITY"])
+        voice_speed: Voice speed for TTS (defaults to constants["TTS_VOICE_SPEED"])
+        voice_sample_rate: Voice sample rate for TTS (defaults to constants["TTS_VOICE_SAMPLE_RATE"])
+        graph_id: Graph ID (defaults to constants["GRAPH_ID"])
     
     Returns:
         Dictionary containing the agent payload
@@ -293,6 +330,23 @@ def create_agent_payload(channel, constants, prompt=None, greeting=None, voice_i
         greeting = constants["DEFAULT_GREETING"]
     if voice_id is None:
         voice_id = constants["TTS_VOICE_ID"]
+    if voice_stability is None:
+        voice_stability = constants["TTS_VOICE_STABILITY"]
+    if voice_speed is None:
+        voice_speed = constants["TTS_VOICE_SPEED"]
+    if voice_sample_rate is None:
+        voice_sample_rate = constants["TTS_VOICE_SAMPLE_RATE"]
+    
+    # Convert voice parameters to appropriate types
+    try:
+        voice_stability = float(voice_stability)
+        voice_speed = float(voice_speed)
+        voice_sample_rate = int(voice_sample_rate)
+    except (ValueError, TypeError):
+        # If conversion fails, use default values
+        voice_stability = 1.0
+        voice_speed = 0.9
+        voice_sample_rate = 24000
     
     # Get token for agent with RTM privileges
     agent_token = build_token_with_rtm(channel, constants["AGENT_UID"], constants)["token"]
@@ -304,20 +358,59 @@ def create_agent_payload(channel, constants, prompt=None, greeting=None, voice_i
         "enable_aivad": True
     }
     
-    agent_payload = {
-        "graph_id": "1.3.1-123-g17c1156",
-        "name": channel,  # Use channel as the agent name
-        "parameters": {
-            "enable_error_message": True
-        },
-        "properties": {
+    # Prepare the LLM params - either use the LLM_PARAMS from environment or default
+    llm_params = {}
+    if constants["LLM_PARAMS"]:
+        try:
+            # Try to parse the JSON string from environment variable
+            llm_params = json.loads(constants["LLM_PARAMS"])
+            
+            # Inject additional required values
+            llm_params.update({
+                "appId": constants["APP_ID"],
+                "channel": channel,
+                "userId": constants["USER_UID"],
+                "enable_rtm": True,
+                "agent_rtm_uid": constants["AGENT_UID"] + "2",
+                "agent_rtm_token": agent_token,
+                "agent_rtm_channel": channel
+            })
+        except (json.JSONDecodeError, TypeError):
+            # If parsing fails, use default params
+            llm_params = {
+                "model": constants["LLM_MODEL"],
+                "stream": True
+            }
+    else:
+        # Use default params
+        llm_params = {
+            "model": constants["LLM_MODEL"],
+            "stream": True
+        }
+    
+    # We need to ensure the graph_id is first in the serialized JSON
+    # To do this, we'll construct our payload as lists of key-value pairs
+    # which will maintain order when converted to JSON
+    payload_items = []
+    
+    # Add graph_id first if available
+    if graph_id:
+        payload_items.append(("graph_id", graph_id))
+    elif constants.get("GRAPH_ID"):
+        payload_items.append(("graph_id", constants["GRAPH_ID"]))
+    
+    # Add other required fields in the desired order
+    payload_items.extend([
+        ("name", channel),
+        ("parameters", {"enable_error_message": True}),
+        ("properties", {
             "channel": channel,
             "token": agent_token,
             "agent_rtc_uid": constants["AGENT_UID"],
             "agent_rtm_uid": constants["AGENT_UID"],
-            "remote_rtc_uids": [constants["USER_UID"]],  # Target the specific user UID
+            "remote_rtc_uids": [constants["USER_UID"]],
             "advanced_features": advanced_features,
-            "enable_string_uid": True,  # Changed to True since we're using string UIDs
+            "enable_string_uid": True,
             "idle_timeout": 30,
             "llm": {
                 "url": constants["LLM_URL"],
@@ -331,10 +424,7 @@ def create_agent_payload(channel, constants, prompt=None, greeting=None, voice_i
                 "greeting_message": greeting,
                 "failure_message": "Sorry but can't talk just now.",
                 "max_history": 3,
-                "params": {
-                    "model": constants["LLM_MODEL"],
-                    "stream": True
-                }
+                "params": llm_params
             },
             "vad": {
                 "silence_duration_ms": 300
@@ -349,13 +439,16 @@ def create_agent_payload(channel, constants, prompt=None, greeting=None, voice_i
                     "key": constants["TTS_KEY"],
                     "model_id": constants["TTS_MODEL"],
                     "voice_id": voice_id,
-                    "stability": 1, 
-                    "speed": 0.90,
-                    "sample_rate": 24000
+                    "stability": voice_stability, 
+                    "speed": voice_speed,
+                    "sample_rate": voice_sample_rate
                 }
             }
-        }
-    }
+        })
+    ])
+    
+    # Convert to OrderedDict to preserve the order
+    agent_payload = OrderedDict(payload_items)
     
     return agent_payload
 
@@ -387,7 +480,15 @@ def send_agent_to_channel(channel, agent_payload, constants):
         "Authorization": constants["AGENT_AUTH_HEADER"]
     }
     
-    payload_json = json.dumps(agent_payload)
+    # Create a custom JSONEncoder to ensure ordered dictionaries maintain their order
+    class OrderedDictEncoder(json.JSONEncoder):
+        def encode(self, obj):
+            if isinstance(obj, OrderedDict):
+                return '{' + ', '.join(f'{json.dumps(k)}: {json.dumps(v)}' for k, v in obj.items()) + '}'
+            return super().encode(obj)
+    
+    # Use the custom encoder to ensure ordered dict keys are preserved
+    payload_json = json.dumps(agent_payload, cls=OrderedDictEncoder)
     
     conn.request("POST", path, payload_json, headers)
     
@@ -395,12 +496,6 @@ def send_agent_to_channel(channel, agent_payload, constants):
     response = conn.getresponse()
     status_code = response.status
     response_text = response.read().decode('utf-8')
-    
-    # Try to parse the response as JSON
-    try:
-        response_json = json.loads(response_text)
-    except json.JSONDecodeError:
-        pass
     
     conn.close()
     
