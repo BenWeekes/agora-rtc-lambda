@@ -30,6 +30,7 @@ def get_env_var(var_name, profile=None, default_value=None):
         The value of the environment variable or default_value
     """
     if profile:
+        # Use exact case as provided
         profiled_var_name = f"{var_name}_{profile}"
         profiled_value = os.environ.get(profiled_var_name)
         if profiled_value is not None:
@@ -99,7 +100,7 @@ def initialize_constants(profile=None):
         "DEFAULT_PROMPT": get_env_var('DEFAULT_PROMPT', profile, 
             "You are a virtual companion. The user can both talk and type to you and you will be sent text. "
             "Say you can hear them if asked. They can also see you as a digital human. "
-            "Keep responses to around 10 to 30 words. Be upbeat and try and keep conversation "
+            "Keep responses to around 10 to 20 words or shorter. Be upbeat and try and keep conversation "
             "going by learning more about the user. "),
         "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there")
     }
@@ -122,6 +123,32 @@ def lambda_handler(event, context):
     
     # Initialize constants with profile
     constants = initialize_constants(profile)
+    
+    # Add environment variable debugging if in debug mode
+    if 'debug' in query_params:
+        # Get all environment variables for debugging
+        env_vars = {}
+        for key, value in os.environ.items():
+            # Mask sensitive values like API keys, only show first/last few characters
+            if 'key' in key.lower() or 'secret' in key.lower() or 'token' in key.lower() or 'certificate' in key.lower():
+                if value and len(value) > 10:
+                    # Show first 4 and last 4 characters with *** in between
+                    masked_value = value[:4] + "****" + value[-4:]
+                    env_vars[key] = masked_value
+                else:
+                    env_vars[key] = "[MASKED]"
+            else:
+                env_vars[key] = value
+                
+        # Return debug info about environment variables and profile
+        if 'env_debug' in query_params:
+            return json_response(200, {
+                "profile_requested": profile,
+                "llm_params_expected_name": f"LLM_PARAMS_{profile}" if profile else "LLM_PARAMS",
+                "llm_params_value": constants["LLM_PARAMS"],
+                "environment_variables": env_vars,
+                "all_constants": constants
+            })
     
     # Check for hangup request
     if 'hangup' in query_params and query_params['hangup'].lower() == 'true':
@@ -171,7 +198,8 @@ def lambda_handler(event, context):
         voice_stability,
         voice_speed,
         voice_sample_rate,
-        graph_id
+        graph_id,
+        debug_mode  # Pass the debug_mode flag to the create_agent_payload function
     )
     
     # In debug mode, return the agent payload instead of sending the agent
@@ -304,7 +332,8 @@ def create_agent_payload(
     voice_stability=None,
     voice_speed=None,
     voice_sample_rate=None,
-    graph_id=None
+    graph_id=None,
+    debug_mode=False
 ):
     """
     Creates the payload for the agent to be sent to the Agora RTC channel
@@ -319,6 +348,7 @@ def create_agent_payload(
         voice_speed: Voice speed for TTS (defaults to constants["TTS_VOICE_SPEED"])
         voice_sample_rate: Voice sample rate for TTS (defaults to constants["TTS_VOICE_SAMPLE_RATE"])
         graph_id: Graph ID (defaults to constants["GRAPH_ID"])
+        debug_mode: Whether to include debug info in the payload
     
     Returns:
         Dictionary containing the agent payload
@@ -345,7 +375,7 @@ def create_agent_payload(
     except (ValueError, TypeError):
         # If conversion fails, use default values
         voice_stability = 1.0
-        voice_speed = 0.9
+        voice_speed = 1.0
         voice_sample_rate = 24000
     
     # Get token for agent with RTM privileges
@@ -360,10 +390,26 @@ def create_agent_payload(
     
     # Prepare the LLM params - either use the LLM_PARAMS from environment or default
     llm_params = {}
+    
+    # Create debug info but don't add it to the payload yet
+    debug_info = {
+        "llm_params_env": constants["LLM_PARAMS"],
+        "llm_model_fallback": constants["LLM_MODEL"]
+    }
+    
     if constants["LLM_PARAMS"]:
         try:
-            # Try to parse the JSON string from environment variable
-            llm_params = json.loads(constants["LLM_PARAMS"])
+            # Fix common JSON formatting issues
+            llm_params_str = constants["LLM_PARAMS"]
+            
+            # Replace typographic quotes with regular quotes
+            llm_params_str = llm_params_str.replace('\u201c', '"').replace('\u201d', '"')
+            llm_params_str = llm_params_str.replace('\u2018', "'").replace('\u2019', "'")
+            
+            # Try to parse the fixed JSON string
+            llm_params = json.loads(llm_params_str)
+            debug_info["llm_params_parsed"] = True
+            debug_info["llm_params_fixed"] = True
             
             # Inject additional required values
             llm_params.update({
@@ -375,7 +421,11 @@ def create_agent_payload(
                 "agent_rtm_token": agent_token,
                 "agent_rtm_channel": channel
             })
-        except (json.JSONDecodeError, TypeError):
+        except Exception as e:
+            # Catch and log all exceptions for better debugging
+            debug_info["llm_params_error"] = str(e)
+            debug_info["llm_params_parsed"] = False
+            
             # If parsing fails, use default params
             llm_params = {
                 "model": constants["LLM_MODEL"],
@@ -383,10 +433,16 @@ def create_agent_payload(
             }
     else:
         # Use default params
+        debug_info["llm_params_parsed"] = False
+        debug_info["reason"] = "No LLM_PARAMS found in environment"
         llm_params = {
             "model": constants["LLM_MODEL"],
             "stream": True
         }
+    
+    # Only add debug info to the llm_params if in debug mode
+    if debug_mode:
+        llm_params["debug_info"] = debug_info
     
     # We need to ensure the graph_id is first in the serialized JSON
     # To do this, we'll construct our payload as lists of key-value pairs
