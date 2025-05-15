@@ -18,3 +18,6 @@ TTS_KEY
 TTS_MODEL    
 TTS_VENDOR=elevenlabs     
 TTS_VOICE_ID=cgSgspJ2msm6clMCkdW9      
+
+
+* Enable CORS on Lambda and increase timeout and memory alloc     
