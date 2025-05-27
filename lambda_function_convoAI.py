@@ -107,6 +107,7 @@ def initialize_constants(profile=None):
     
     return constants
 
+
 def lambda_handler(event, context):
     """
     Lambda handler function that processes the incoming request, generates tokens,
@@ -163,13 +164,36 @@ def lambda_handler(event, context):
             "agent_response": hangup_response
         })
     
-    # Normal join flow
+    # Normal join flow or token-only flow
     # Get channel from query parameters
     if 'channel' not in query_params:
         return json_response(400, {"error": "Missing channel parameter"})
     
     channel = query_params['channel']
     
+    # Check if this is a connect=false request (token-only mode)
+    connect_param = query_params.get('connect', 'true').lower()
+    token_only_mode = connect_param == 'false'
+    
+    # Get token for user with RTC and RTM capabilities
+    user_token_data = build_token_with_rtm(channel, constants["USER_UID"], constants)
+    
+    # If connect=false, return only the user token without starting the agent
+    if token_only_mode:
+        return json_response(200, {
+            "user_token": user_token_data,
+            "agent_response": {
+                "status_code": 200,
+                "response": json.dumps({
+                    "message": "Token-only mode: user token generated successfully",
+                    "mode": "token_only",
+                    "connect": False
+                }),
+                "success": True
+            }
+        })
+    
+    # Normal connect=true flow: create and send agent
     # Get optional prompt, greeting, voice_id, and debug parameters
     prompt = query_params.get('prompt', constants["DEFAULT_PROMPT"])
     greeting = query_params.get('greeting', constants["DEFAULT_GREETING"])
@@ -184,9 +208,6 @@ def lambda_handler(event, context):
     graph_id = query_params.get('graph_id', constants["GRAPH_ID"])
     
     debug_mode = 'debug' in query_params
-    
-    # Get token for user with RTC and RTM capabilities
-    user_token_data = build_token_with_rtm(channel, constants["USER_UID"], constants)
     
     # Create agent payload for sending to the channel
     agent_payload = create_agent_payload(
@@ -226,6 +247,7 @@ def lambda_handler(event, context):
         "agent_response": agent_response
     })
 
+
 def json_response(status_code, body):
     """
     Creates a properly formatted JSON response for API Gateway
@@ -243,6 +265,7 @@ def json_response(status_code, body):
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps(body)
     }
+
 
 def hangup_agent(agent_id, constants):
     """
@@ -287,6 +310,7 @@ def hangup_agent(agent_id, constants):
         "success": status_code == 200
     }
 
+
 def build_token_with_rtm(channel_name, account, constants):
     """
     Builds a token with both RTC and RTM privileges, similar to the Go example.
@@ -322,6 +346,7 @@ def build_token_with_rtm(channel_name, account, constants):
     token.addPrivilege(1000, constants["TOKEN_EXPIRE"])
     
     return {"token": token.build(), "uid": account}
+
 
 def create_agent_payload(
     channel, 
@@ -383,9 +408,9 @@ def create_agent_payload(
     
     # Define advanced features with enable_aivad hardcoded to true
     advanced_features = {
-        "enable_bhvs": True,
+        "enable_bhvs": False,
         "enable_rtm": True,
-        "enable_aivad": True
+        "enable_aivad": False
     }
     
     # Prepare the LLM params - either use the LLM_PARAMS from environment or default
@@ -508,6 +533,7 @@ def create_agent_payload(
     
     return agent_payload
 
+
 def send_agent_to_channel(channel, agent_payload, constants):
     """
     Sends an agent to the specified Agora RTC channel by calling the REST API
@@ -562,25 +588,31 @@ def send_agent_to_channel(channel, agent_payload, constants):
         "success": status_code == 200
     }
 
+
 def getVersion():
     """Returns the version string for the token"""
     return '006'
+
 
 def packUint16(x):
     """Packs an unsigned 16-bit integer"""
     return struct.pack('<H', int(x))
 
+
 def packUint32(x):
     """Packs an unsigned 32-bit integer"""
     return struct.pack('<I', int(x))
+
 
 def packInt32(x):
     """Packs a signed 32-bit integer"""
     return struct.pack('<i', int(x))
 
+
 def packString(string):
     """Packs a string with its length prefix"""
     return packUint16(len(string)) + string
+
 
 def packMap(m):
     """Packs a map of key-value pairs where values are strings"""
@@ -589,12 +621,14 @@ def packMap(m):
         ret += packUint16(k) + packString(v)
     return ret
 
+
 def packMapUint32(m):
     """Packs a map of key-value pairs where values are uint32"""
     ret = packUint16(len(list(m.items())))
     for k, v in list(m.items()):
         ret += packUint16(k) + packUint32(v)
     return ret
+
 
 class ReadByteBuffer:
     """Helper class for unpacking binary data"""
@@ -633,6 +667,7 @@ class ReadByteBuffer:
             messages[key] = value
         return messages
 
+
 def unPackContent(buff):
     """Unpacks the content portion of a token"""
     readbuf = ReadByteBuffer(buff)
@@ -642,6 +677,7 @@ def unPackContent(buff):
     m = readbuf.unPackString()
     return signature, crc_channel_name, crc_uid, m
 
+
 def unPackMessages(buff):
     """Unpacks the messages portion of a token"""
     readbuf = ReadByteBuffer(buff)
@@ -649,6 +685,7 @@ def unPackMessages(buff):
     ts = readbuf.unPackUint32()
     messages = readbuf.unPackMapUint32()
     return salt, ts, messages
+
 
 class AccessToken:
     """
