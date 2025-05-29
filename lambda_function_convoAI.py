@@ -440,9 +440,9 @@ def create_agent_payload(
             llm_params.update({
                 "appId": constants["APP_ID"],
                 "channel": channel,
-                "userId": constants["USER_UID"],
+                "userId": constants["USER_UID"] + "-" + channel,
                 "enable_rtm": True,
-                "agent_rtm_uid": constants["AGENT_UID"] + "2",
+                "agent_rtm_uid": constants["AGENT_UID"] + "2" + "-" + channel,
                 "agent_rtm_token": agent_token,
                 "agent_rtm_channel": channel
             })
@@ -488,7 +488,7 @@ def create_agent_payload(
             "channel": channel,
             "token": agent_token,
             "agent_rtc_uid": constants["AGENT_UID"],
-            "agent_rtm_uid": constants["AGENT_UID"],
+            "agent_rtm_uid": constants["AGENT_UID"] + "-" + channel,
             "remote_rtc_uids": [constants["USER_UID"]],
             "advanced_features": advanced_features,
             "enable_string_uid": True,
