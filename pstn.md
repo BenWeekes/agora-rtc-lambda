@@ -3,7 +3,7 @@
 When an inbound phone number is dialled, the Agora PSTN gateway will prompt the user for a variable length PIN followed by the # key.  
 The PSTN gateway can then call a URL to find out what Agora RTC channel the phone should be connected to and to trigger sending a convoAI agent into the same channel.     
 
-The python code in [lambda_function_convoAI_pstn.py](./lambda_function_convoAI_pstn.py) can be copied to a lambda function in your AWS account as shown in this demo video: [![Demo Video](https://img.shields.io/badge/🎥_Watch-Demo_Video-blue?style=for-the-badge)](https://drive.google.com/file/d/13mw4jCw62K0YsgffvkCO1KKrme1GP7XB/view?usp=sharing)    
+The python code in [lambda_function_convoAI_pstn.py](./lambda_function_convoAI_pstn.py) can be copied to a lambda function and configured in your AWS account as shown in this demo video: [![Demo Video](https://img.shields.io/badge/🎥_Watch-Demo_Video-blue?style=for-the-badge)](https://drive.google.com/file/d/13mw4jCw62K0YsgffvkCO1KKrme1GP7XB/view?usp=sharing)    
 
 The environment variables below can be set in your lambda function to configure the agent behavior per pin.     
 The lambda function URL can be provided to Agora PSTN admin to be assigned to your inbound phone number.            
