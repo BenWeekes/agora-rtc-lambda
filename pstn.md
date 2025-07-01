@@ -64,4 +64,4 @@ DEFAULT_GREETING_1234=Hello! How can I help you today?
 pinlookup_4412345678=https://zeebonggpkkllkks.lambda-url.us-east-1.on.aws
 ```
 
-📚 [Agora PSTN Documentation](https://github.com/AgoraIO-Solutions/pstn-doc)
+📚 [Agora PSTN API Documentation](https://github.com/AgoraIO-Solutions/pstn-doc)
