@@ -7,7 +7,7 @@ The python code in [lambda_function_convoAI_pstn.py](./lambda_function_convoAI_p
 📹 [Watch Demo Video](https://drive.google.com/file/d/13mw4jCw62K0YsgffvkCO1KKrme1GP7XB/view?usp=sharing)    
 
 The environment variables below can be set in your lambda function to configure the agent behavior per pin.     
-The lambda function URL can be provided to Agora PSTN admin to be assigned to your inbound phone number.            
+The lambda function URL can then be provided to Agora PSTN admin to be assigned to your inbound phone number.            
 
 ## Environment Variables
 
