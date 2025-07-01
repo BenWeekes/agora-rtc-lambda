@@ -57,3 +57,9 @@ DEFAULT_PROMPT_1234=You are a helpful AI assistant. Keep responses short and con
 DEFAULT_GREETING_1234=Hello! How can I help you today?
 ```
 
+## Agora PSTN .pools configuration example entry
+
+```bash
+pinlookup_4412345678=https://zeebonggpkkllkks.lambda-url.us-east-1.on.aws
+```
+
