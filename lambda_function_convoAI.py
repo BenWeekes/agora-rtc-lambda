@@ -68,6 +68,7 @@ def initialize_constants(profile=None):
         # Fixed UIDs as strings
         "AGENT_UID": "agent",
         "USER_UID": "user",
+        "AGENT_VIDEO_UID": "agent_video",
         
         # Constants for token generation
         "VERSION_LENGTH": 3,
@@ -102,7 +103,10 @@ def initialize_constants(profile=None):
             "Say you can hear them if asked. They can also see you as a digital human. "
             "Keep responses to around 10 to 20 words or shorter. Be upbeat and try and keep conversation "
             "going by learning more about the user. "),
-        "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there")
+        "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there"),
+        
+        # Controller endpoint
+        "CONTROLLER_ENDPOINT": get_env_var('CONTROLLER_ENDPOINT', profile, "http://35.179.118.134:3000/")
     }
     
     return constants
@@ -161,7 +165,8 @@ def lambda_handler(event, context):
         hangup_response = hangup_agent(agent_id, constants)
         
         return json_response(200, {
-            "agent_response": hangup_response
+            "agent_response": hangup_response,
+            "controller_endpoint": constants["CONTROLLER_ENDPOINT"]
         })
     
     # Normal join flow or token-only flow
@@ -178,14 +183,19 @@ def lambda_handler(event, context):
     # Get token for user with RTC and RTM capabilities
     user_token_data = build_token_with_rtm(channel, constants["USER_UID"], constants)
     
-    # If connect=false, return only the user token without starting the agent
+    # Get token for agent video with RTC and RTM capabilities
+    agent_video_token_data = build_token_with_rtm(channel, constants["AGENT_VIDEO_UID"], constants)
+    
+    # If connect=false, return only the user token and agent video token without starting the agent
     if token_only_mode:
         return json_response(200, {
             "user_token": user_token_data,
+            "agent_video_token": agent_video_token_data,
+            "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
             "agent_response": {
                 "status_code": 200,
                 "response": json.dumps({
-                    "message": "Token-only mode: user token generated successfully",
+                    "message": "Token-only mode: user token and agent video token generated successfully",
                     "mode": "token_only",
                     "connect": False
                 }),
@@ -227,6 +237,8 @@ def lambda_handler(event, context):
     if debug_mode:
         return json_response(200, {
             "user_token": user_token_data,
+            "agent_video_token": agent_video_token_data,
+            "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
             "agent_payload": agent_payload
         })
     
@@ -238,12 +250,16 @@ def lambda_handler(event, context):
         error_status = agent_response.get("status_code", 500)
         return json_response(error_status, {
             "user_token": user_token_data,
+            "agent_video_token": agent_video_token_data,
+            "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
             "agent_response": agent_response,
             "error": f"Failed to send agent to channel. API returned status {error_status}."
         })
     
     return json_response(200, {
         "user_token": user_token_data,
+        "agent_video_token": agent_video_token_data,
+        "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
         "agent_response": agent_response
     })
 
