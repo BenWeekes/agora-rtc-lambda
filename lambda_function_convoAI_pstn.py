@@ -4,6 +4,7 @@ from hashlib import sha256
 import base64
 import struct
 from zlib import crc32
+import zlib
 import secrets
 import time
 import random
@@ -18,26 +19,26 @@ import os
 def get_env_var(var_name, pin=None, default_value=None):
     """
     Gets an environment variable with PIN support.
-    If pin is provided, it first checks for VAR_NAME_PIN.
-    If that doesn't exist, it falls back to VAR_NAME.
+    If pin is provided and not "0000", it first checks for VAR_NAME_PIN.
+    If pin is "0000" or PIN-specific variable doesn't exist, it falls back to VAR_NAME.
     If that doesn't exist, it returns the default_value.
     
     Args:
         var_name: The environment variable name
-        pin: Optional PIN suffix
+        pin: Optional PIN suffix (if "0000", uses default variables)
         default_value: Default value if neither variable exists
         
     Returns:
         The value of the environment variable or default_value
     """
-    if pin:
+    if pin and pin != "0000":
         # Use exact case as provided
         pin_var_name = f"{var_name}_{pin}"
         pin_value = os.environ.get(pin_var_name)
         if pin_value is not None:
             return pin_value
     
-    # Fall back to standard variable
+    # Fall back to standard variable (also used when pin is "0000")
     value = os.environ.get(var_name)
     if value is not None:
         return value
@@ -111,14 +112,20 @@ def initialize_constants(pin=None):
 
 def check_pin_validity(pin):
     """
-    Checks if PIN-specific environment variables exist for prompt and greeting
+    Checks if PIN-specific environment variables exist for prompt and greeting.
+    Special case: PIN "0000" is always valid and uses default environment variables.
     
     Args:
         pin: The PIN number to check
         
     Returns:
-        Boolean indicating if both DEFAULT_PROMPT_{pin} and DEFAULT_GREETING_{pin} exist
+        Boolean indicating if PIN is valid
     """
+    # PIN "0000" is always valid - it uses default environment variables
+    if pin == "0000":
+        return True
+    
+    # For other PINs, check if PIN-specific variables exist
     pin_prompt = os.environ.get(f"DEFAULT_PROMPT_{pin}")
     pin_greeting = os.environ.get(f"DEFAULT_GREETING_{pin}")
     
@@ -394,24 +401,22 @@ def build_token_with_rtm(channel_name, account, constants):
     if not constants["APP_CERTIFICATE"]:
         return {"token": constants["APP_ID"], "uid": account}
     
-    # For this implementation, we'll continue using the AccessToken class from the original code
-    # but add both RTC and RTM privileges
-    token = AccessToken(constants["APP_ID"], constants["APP_CERTIFICATE"], channel_name, account)
+    # Use the new AccessToken implementation with services
+    token = AccessToken(constants["APP_ID"], constants["APP_CERTIFICATE"])
     
-    # RTC privileges - for channel
-    # 1: Join Channel
-    token.addPrivilege(1, constants["PRIVILEGE_EXPIRE"])
-    # 2: Publish Audio
-    token.addPrivilege(2, constants["PRIVILEGE_EXPIRE"])
-    # 3: Publish Video
-    token.addPrivilege(3, constants["PRIVILEGE_EXPIRE"])
-    # 4: Publish Data Stream
-    token.addPrivilege(4, constants["PRIVILEGE_EXPIRE"])
+    # RTC Service
+    rtc_service = ServiceRtc(channel_name, account)
+    rtc_service.add_privilege(ServiceRtc.kPrivilegeJoinChannel, constants["PRIVILEGE_EXPIRE"])
+    rtc_service.add_privilege(ServiceRtc.kPrivilegePublishAudioStream, constants["PRIVILEGE_EXPIRE"])
+    rtc_service.add_privilege(ServiceRtc.kPrivilegePublishVideoStream, constants["PRIVILEGE_EXPIRE"])
+    rtc_service.add_privilege(ServiceRtc.kPrivilegePublishDataStream, constants["PRIVILEGE_EXPIRE"])
+    token.add_service(rtc_service)
     
-    # RTM privilege - for login
-    # 1000: RTM Login
-    token.addPrivilege(1000, constants["TOKEN_EXPIRE"])
-    
+    # RTM Service
+    rtm_service = ServiceRtm(account)
+    rtm_service.add_privilege(ServiceRtm.kPrivilegeLogin, constants["TOKEN_EXPIRE"])
+    token.add_service(rtm_service)
+
     return {"token": token.build(), "uid": account}
 
 
@@ -656,159 +661,292 @@ def send_agent_to_channel(channel, agent_payload, constants):
     }
 
 
-def getVersion():
-    """Returns the version string for the token"""
-    return '006'
+# Token Version 007 Implementation
+def get_version():
+    return '007'
 
 
-def packUint16(x):
-    """Packs an unsigned 16-bit integer"""
+def pack_uint16(x):
     return struct.pack('<H', int(x))
 
 
-def packUint32(x):
-    """Packs an unsigned 32-bit integer"""
+def unpack_uint16(buffer):
+    data_length = struct.calcsize('H')
+    return struct.unpack('<H', buffer[:data_length])[0], buffer[data_length:]
+
+
+def pack_uint32(x):
     return struct.pack('<I', int(x))
 
 
-def packInt32(x):
-    """Packs a signed 32-bit integer"""
-    return struct.pack('<i', int(x))
+def unpack_uint32(buffer):
+    data_length = struct.calcsize('I')
+    return struct.unpack('<I', buffer[:data_length])[0], buffer[data_length:]
 
 
-def packString(string):
-    """Packs a string with its length prefix"""
-    return packUint16(len(string)) + string
+def pack_int16(x):
+    return struct.pack('<h', int(x))
 
 
-def packMap(m):
-    """Packs a map of key-value pairs where values are strings"""
-    ret = packUint16(len(list(m.items())))
-    for k, v in list(m.items()):
-        ret += packUint16(k) + packString(v)
-    return ret
+def unpack_int16(buffer):
+    data_length = struct.calcsize('h')
+    return struct.unpack('<h', buffer[:data_length])[0], buffer[data_length:]
 
 
-def packMapUint32(m):
-    """Packs a map of key-value pairs where values are uint32"""
-    ret = packUint16(len(list(m.items())))
-    for k, v in list(m.items()):
-        ret += packUint16(k) + packUint32(v)
-    return ret
+def pack_string(string):
+    if isinstance(string, str):
+        string = string.encode('utf-8')
+    return pack_uint16(len(string)) + string
 
 
-class ReadByteBuffer:
-    """Helper class for unpacking binary data"""
-    def __init__(self, bytes):
-        self.buffer = bytes
-        self.position = 0
-
-    def unPackUint16(self):
-        len = struct.calcsize('H')
-        buff = self.buffer[self.position: self.position + len]
-        ret = struct.unpack('<H', buff)[0]
-        self.position += len
-        return ret
-
-    def unPackUint32(self):
-        len = struct.calcsize('I')
-        buff = self.buffer[self.position: self.position + len]
-        ret = struct.unpack('<I', buff)[0]
-        self.position += len
-        return ret
-
-    def unPackString(self):
-        strlen = self.unPackUint16()
-        buff = self.buffer[self.position: self.position + strlen]
-        ret = struct.unpack('<' + str(strlen) + 's', buff)[0]
-        self.position += strlen
-        return ret
-
-    def unPackMapUint32(self):
-        messages = {}
-        maplen = self.unPackUint16()
-
-        for index in range(maplen):
-            key = self.unPackUint16()
-            value = self.unPackUint32()
-            messages[key] = value
-        return messages
+def unpack_string(buffer):
+    data_length, buffer = unpack_uint16(buffer)
+    return struct.unpack('<{}s'.format(data_length), buffer[:data_length])[0], buffer[data_length:]
 
 
-def unPackContent(buff):
-    """Unpacks the content portion of a token"""
-    readbuf = ReadByteBuffer(buff)
-    signature = readbuf.unPackString()
-    crc_channel_name = readbuf.unPackUint32()
-    crc_uid = readbuf.unPackUint32()
-    m = readbuf.unPackString()
-    return signature, crc_channel_name, crc_uid, m
+def pack_map_uint32(m):
+    return pack_uint16(len(m)) + b''.join([pack_uint16(k) + pack_uint32(v) for k, v in m.items()])
 
 
-def unPackMessages(buff):
-    """Unpacks the messages portion of a token"""
-    readbuf = ReadByteBuffer(buff)
-    salt = readbuf.unPackUint32()
-    ts = readbuf.unPackUint32()
-    messages = readbuf.unPackMapUint32()
-    return salt, ts, messages
+def unpack_map_uint32(buffer):
+    data_length, buffer = unpack_uint16(buffer)
+
+    data = {}
+    for i in range(data_length):
+        k, buffer = unpack_uint16(buffer)
+        v, buffer = unpack_uint32(buffer)
+        data[k] = v
+    return data, buffer
+
+
+def pack_map_string(m):
+    return pack_uint16(len(m)) + b''.join([pack_uint16(k) + pack_string(v) for k, v in m.items()])
+
+
+def unpack_map_string(buffer):
+    data_length, buffer = unpack_uint16(buffer)
+
+    data = {}
+    for i in range(data_length):
+        k, buffer = unpack_uint16(buffer)
+        v, buffer = unpack_string(buffer)
+        data[k] = v
+    return data, buffer
+
+
+class Service:
+    def __init__(self, service_type):
+        self.__type = service_type
+        self.__privileges = {}
+
+    def __pack_type(self):
+        return pack_uint16(self.__type)
+
+    def __pack_privileges(self):
+        privileges = OrderedDict(
+            sorted(iter(self.__privileges.items()), key=lambda x: int(x[0])))
+        return pack_map_uint32(privileges)
+
+    def add_privilege(self, privilege, expire):
+        self.__privileges[privilege] = expire
+
+    def service_type(self):
+        return self.__type
+
+    def pack(self):
+        return self.__pack_type() + self.__pack_privileges()
+
+    def unpack(self, buffer):
+        self.__privileges, buffer = unpack_map_uint32(buffer)
+        return buffer
+
+
+class ServiceRtc(Service):
+    kServiceType = 1
+
+    kPrivilegeJoinChannel = 1
+    kPrivilegePublishAudioStream = 2
+    kPrivilegePublishVideoStream = 3
+    kPrivilegePublishDataStream = 4
+
+    def __init__(self, channel_name='', uid=0):
+        super(ServiceRtc, self).__init__(ServiceRtc.kServiceType)
+        self.__channel_name = channel_name.encode('utf-8')
+        self.__uid = b'' if uid == 0 else str(uid).encode('utf-8')
+
+    def pack(self):
+        return super(ServiceRtc, self).pack() + pack_string(self.__channel_name) + pack_string(self.__uid)
+
+    def unpack(self, buffer):
+        buffer = super(ServiceRtc, self).unpack(buffer)
+        self.__channel_name, buffer = unpack_string(buffer)
+        self.__uid, buffer = unpack_string(buffer)
+        return buffer
+
+
+class ServiceRtm(Service):
+    kServiceType = 2
+
+    kPrivilegeLogin = 1
+
+    def __init__(self, user_id=''):
+        super(ServiceRtm, self).__init__(ServiceRtm.kServiceType)
+        self.__user_id = user_id.encode('utf-8')
+
+    def pack(self):
+        return super(ServiceRtm, self).pack() + pack_string(self.__user_id)
+
+    def unpack(self, buffer):
+        buffer = super(ServiceRtm, self).unpack(buffer)
+        self.__user_id, buffer = unpack_string(buffer)
+        return buffer
+
+
+class ServiceFpa(Service):
+    kServiceType = 4
+
+    kPrivilegeLogin = 1
+
+    def __init__(self):
+        super(ServiceFpa, self).__init__(ServiceFpa.kServiceType)
+
+    def pack(self):
+        return super(ServiceFpa, self).pack()
+
+    def unpack(self, buffer):
+        buffer = super(ServiceFpa, self).unpack(buffer)
+        return buffer
+
+
+class ServiceChat(Service):
+    kServiceType = 5
+
+    kPrivilegeUser = 1
+    kPrivilegeApp = 2
+
+    def __init__(self, user_id=''):
+        super(ServiceChat, self).__init__(ServiceChat.kServiceType)
+        self.__user_id = user_id.encode('utf-8')
+
+    def pack(self):
+        return super(ServiceChat, self).pack() + pack_string(self.__user_id)
+
+    def unpack(self, buffer):
+        buffer = super(ServiceChat, self).unpack(buffer)
+        self.__user_id, buffer = unpack_string(buffer)
+        return buffer
+
+
+class ServiceEducation(Service):
+    kServiceType = 7
+
+    kPrivilegeRoomUser = 1
+    kPrivilegeUser = 2
+    kPrivilegeApp = 3
+
+    def __init__(self, room_uuid='', user_uuid='', role=-1):
+        super(ServiceEducation, self).__init__(ServiceEducation.kServiceType)
+        self.__room_uuid = room_uuid.encode('utf-8')
+        self.__user_uuid = user_uuid.encode('utf-8')
+        self.__role = role
+
+    def pack(self):
+        return super(ServiceEducation, self).pack() + pack_string(self.__room_uuid) + pack_string(
+            self.__user_uuid) + pack_int16(self.__role)
+
+    def unpack(self, buffer):
+        buffer = super(ServiceEducation, self).unpack(buffer)
+        self.__room_uuid, buffer = unpack_string(buffer)
+        self.__user_uuid, buffer = unpack_string(buffer)
+        self.__role, buffer = unpack_int16(buffer)
+        return buffer
 
 
 class AccessToken:
-    """
-    Class for building and parsing Agora access tokens
-    """
-    def __init__(self, appID='', appCertificate='', channelName='', uid=''):
-        self.appID = appID
-        self.appCertificate = appCertificate
-        self.channelName = channelName
-        self.ts = int(time.time()) + 24 * 3600
-        self.salt = secrets.SystemRandom().randint(1, 99999999)
-        self.messages = {}
-        if uid == 0 or uid == "":
-            self.uidStr = ""
-        else:
-            self.uidStr = str(uid)
+    kServices = {
+        ServiceRtc.kServiceType: ServiceRtc,
+        ServiceRtm.kServiceType: ServiceRtm,
+        ServiceFpa.kServiceType: ServiceFpa,
+        ServiceChat.kServiceType: ServiceChat,
+        ServiceEducation.kServiceType: ServiceEducation,
+    }
 
-    def addPrivilege(self, privilege, expireTimestamp):
-        """Adds a privilege to the token"""
-        self.messages[privilege] = expireTimestamp
+    VERSION_LENGTH = 3
+    APP_ID_LENGTH = 32
 
-    def fromString(self, originToken):
-        """Parses a token from a string"""
-        try:
-            dk6version = getVersion()
-            originVersion = originToken[:VERSION_LENGTH]
-            if (originVersion != dk6version):
+    def __init__(self, app_id='', app_certificate='', issue_ts=0, expire=900):
+        self.__app_id = app_id
+        self.__app_cert = app_certificate
+
+        self.__issue_ts = issue_ts if issue_ts != 0 else int(time.time())
+        self.__expire = expire
+        self.__salt = secrets.SystemRandom().randint(1, 99999999)
+
+        self.__service = {}
+
+    def __signing(self):
+        signing = hmac.new(pack_uint32(self.__issue_ts),
+                           self.__app_cert, sha256).digest()
+        signing = hmac.new(pack_uint32(self.__salt), signing, sha256).digest()
+        return signing
+
+    def __build_check(self):
+        def is_uuid(data):
+            if len(data) != 32:
                 return False
+            try:
+                bytes.fromhex(data)
+            except:
+                return False
+            return True
 
-            originAppID = originToken[VERSION_LENGTH:(VERSION_LENGTH + APP_ID_LENGTH)]
-            originContent = originToken[(VERSION_LENGTH + APP_ID_LENGTH):]
-            originContentDecoded = base64.b64decode(originContent)
-            signature, crc_channel_name, crc_uid, m = unPackContent(originContentDecoded)
-            self.salt, self.ts, self.messages = unPackMessages(m)
-
-        except Exception as e:
-            print("error:", str(e))
+        if not is_uuid(self.__app_id) or not is_uuid(self.__app_cert):
             return False
-
+        if not self.__service:
+            return False
         return True
 
+    def add_service(self, service):
+        self.__service[service.service_type()] = service
+
     def build(self):
-        """Builds a token string"""
-        self.messages = OrderedDict(sorted(iter(self.messages.items()), key=lambda x: int(x[0])))
-        m = packUint32(self.salt) + packUint32(self.ts) \
-            + packMapUint32(self.messages)
+        if not self.__build_check():
+            return ''
 
-        val = self.appID.encode('utf-8') + self.channelName.encode('utf-8') + self.uidStr.encode('utf-8') + m
-        signature = hmac.new(self.appCertificate.encode('utf-8'), val, sha256).digest()
-        crc_channel_name = crc32(self.channelName.encode('utf-8')) & 0xffffffff
-        crc_uid = crc32(self.uidStr.encode('utf-8')) & 0xffffffff
-        content = packString(signature) \
-                  + packUint32(crc_channel_name) \
-                  + packUint32(crc_uid) \
-                  + packString(m)
+        self.__app_id = self.__app_id.encode('utf-8')
+        self.__app_cert = self.__app_cert.encode('utf-8')
+        signing = self.__signing()
+        signing_info = pack_string(self.__app_id) + pack_uint32(self.__issue_ts) + pack_uint32(self.__expire) + \
+                       pack_uint32(self.__salt) + pack_uint16(len(self.__service))
 
-        version = getVersion()
-        ret = version + self.appID + base64.b64encode(content).decode('utf-8')
-        return ret
+        for _, service in self.__service.items():
+            signing_info += service.pack()
+
+        signature = hmac.new(signing, signing_info, sha256).digest()
+
+        return get_version() + base64.b64encode(zlib.compress(pack_string(signature) + signing_info)).decode('utf-8')
+
+    def from_string(self, origin_token):
+        try:
+            origin_version = origin_token[:self.VERSION_LENGTH]
+            if origin_version != get_version():
+                return False
+
+            buffer = zlib.decompress(
+                base64.b64decode(origin_token[self.VERSION_LENGTH:]))
+            signature, buffer = unpack_string(buffer)
+            self.__app_id, buffer = unpack_string(buffer)
+            self.__issue_ts, buffer = unpack_uint32(buffer)
+            self.__expire, buffer = unpack_uint32(buffer)
+            self.__salt, buffer = unpack_uint32(buffer)
+            service_count, buffer = unpack_uint16(buffer)
+
+            for i in range(service_count):
+                service_type, buffer = unpack_uint16(buffer)
+                service = AccessToken.kServices[service_type]()
+                buffer = service.unpack(buffer)
+                self.__service[service_type] = service
+        except Exception as e:
+            print('Error: {}'.format(repr(e)))
+            raise ValueError('Error: parse origin token failed')
+        return True
