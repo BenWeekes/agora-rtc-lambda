@@ -1,4 +1,4 @@
-# HeyGen Lambda Function README
+# HeyGen Lambda Function For ConvoAI
 
 ## Setup Instructions
 
@@ -23,19 +23,19 @@ Set the following environment variables in your Lambda function:
 
 | Variable | Example Value | Description |
 |----------|--------------|-------------|
-| `AGENT_AUTH_HEADER` | `Basic NzViOGUy****ODMwNGE2Y2E2MzYwMGRhYTkyMWQwMjk=` | Agora agent authorization header |
-| `APP_ID` | `20b7c51ff4c644ab80cf5a4e646b0537` | Agora App ID |
+| `AGENT_AUTH_HEADER` | `Basic NzViOGUy****ODMwN****MzYwMGR****QwMjk=` | Agora agent authorization header |
+| `APP_ID` | `****ff****80cf****b0537` | Agora App ID |
 | `APP_CERTIFICATE` | *(optional)* | Agora App Certificate |
 | `DEFAULT_GREETING` | `Welcome to My Shop Live` | Initial greeting message |
 | `DEFAULT_PROMPT` | `You are a live shopping assistant on myshop.live...` | System prompt for the AI |
-| `HEYGEN_API_KEY` | `NGNkNmQ5****MTczMzg2OTY0MQ==` | HeyGen API key |
+| `HEYGEN_API_KEY` | `****5****MTczM****MQ==` | HeyGen API key |
 | `HEYGEN_AVATAR_ID` | `Wayne_20240711` | HeyGen avatar ID (optional) |
 | `HEYGEN_QUALITY` | `high` | HeyGen quality setting |
-| `LLM_API_KEY` | `my_secret_****` | LLM API key |
-| `LLM_URL` | `https://sa-astra.agora.io:444/v1/chat/dripshop` | LLM endpoint URL |
+| `LLM_API_KEY` | `****et_****` | LLM API key |
+| `LLM_URL` | `https://sa-********:444/v1/chat/dripshop` | LLM endpoint URL |
 | `LLM_MODEL` | `llama-3.3-70b-versatile` | LLM model name |
 | `LLM_PARAMS` | `{"baseURL":"https://api.groq.com/openai/v1","apiKey":"gsk_****","model":"llama-3.3-70b-versatile","stream":true}` | Additional LLM parameters (JSON) |
-| `TTS_KEY` | `sk_27e975ee****8b4e569` | Text-to-speech API key |
+| `TTS_KEY` | `sk_****e****8b4e569` | Text-to-speech API key |
 | `TTS_VENDOR` | `elevenlabs` | TTS vendor (elevenlabs or cartesia) |
 | `TTS_MODEL` | `eleven_flash_v2_5` | TTS model ID |
 | `TTS_VOICE_ID` | `TX3LPaxmHKxFdv7VOQHJ` | TTS voice ID |
