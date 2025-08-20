@@ -148,3 +148,5 @@ GET https://your-function-url.lambda-url.region.on.aws/?channel=my-channel&debug
 - HeyGen avatar integration creates a video stream on UID "3"
 - User UID is "0" and Agent UID is "1" by default
 - All API keys should be kept secure and never exposed in client-side code
+- The function uses v007 token generation with service-based architecture
+- Supports both ElevenLabs and Cartesia TTS vendors
