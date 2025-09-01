@@ -48,36 +48,48 @@ The function uses PIN-based environment variable lookup with the following logic
 - For other PINs: Requires PIN-specific variables (`VARIABLE_NAME_{PIN}`)
 - Other variables fall back from `VARIABLE_NAME_{PIN}` to `VARIABLE_NAME`
 
-| Variable | Example Value | Required | Description |
-|----------|--------------|----------|-------------|
-| **Agora Configuration** |
-| `APP_ID` | `****ff****80cf****b0537` | ✅ | Agora App ID |
-| `APP_CERTIFICATE` | *(optional)* | | Agora App Certificate (empty string if security disabled) |
-| `AGENT_AUTH_HEADER` | `Basic NzViOGUy****ODMwN****MzYwMGR****QwMjk=` | ✅ | Authorization header for Agora API |
-| **PIN-Specific Variables** |
-| `DEFAULT_PROMPT_{PIN}` | `You are a helpful AI assistant...` | ✅ (for non-0000 PINs) | System prompt for the AI agent |
-| `DEFAULT_GREETING_{PIN}` | `Hello! How can I help you today?` | ✅ (for non-0000 PINs) | Greeting message |
-| **Fallback Variables (used for PIN 0000)** |
-| `DEFAULT_PROMPT` | `You are a virtual companion...` | ✅ (for PIN 0000) | Fallback system prompt |
-| `DEFAULT_GREETING` | `hi there` | ✅ (for PIN 0000) | Fallback greeting message |
-| **LLM Configuration** |
-| `LLM_URL` | `https://api.groq.com/openai/v1/chat/completions` | ✅ | LLM API endpoint |
-| `LLM_API_KEY` | `gsk_your_groq_api_key` | ✅ | LLM API key |
-| `LLM_MODEL` | `llama-3.3-70b-versatile` | ✅ | LLM model name |
-| `LLM_PARAMS` | `{"baseURL":"https://api.groq.com/openai/v1","apiKey":"gsk_****","model":"llama-3.3-70b-versatile","stream":true}` | | Additional LLM parameters (JSON) |
-| **TTS Configuration** |
-| `TTS_VENDOR` | `elevenlabs` | ✅ | Text-to-speech vendor |
-| `TTS_KEY` | `your_elevenlabs_api_key` | ✅ | TTS API key |
-| `TTS_MODEL` | `eleven_flash_v2_5` | ✅ | TTS model name |
-| `TTS_VOICE_ID` | `21m00Tcm4TlvDq8ikWAM` | ✅ | TTS voice ID |
-| `TTS_VOICE_STABILITY` | `1` | | Voice stability (0-1, default: "1") |
-| `TTS_VOICE_SPEED` | `1.0` | | Voice speed multiplier (default: "1.0") |
-| `TTS_VOICE_SAMPLE_RATE` | `24000` | | Sample rate in Hz (default: "24000") |
-| **ASR Configuration** |
-| `ASR_LANGUAGE` | `en-US` | | ASR language (default: "en-US") |
-| `ASR_VENDOR` | `deepgram` | | ASR vendor (default: "deepgram") |
-| **Optional** |
-| `GRAPH_ID` | | | Agora graph ID |
+### Agora Configuration (Required)
+- `APP_ID` - Agora App ID
+- `APP_CERTIFICATE` - Agora App Certificate (empty string if security disabled)
+- `AGENT_AUTH_HEADER` - Authorization header for Agora API
+
+### PIN-Specific Agent Variables
+All agent configuration variables can have PIN-specific versions using the format `VARIABLE_NAME_{PIN}`:
+
+- `DEFAULT_PROMPT_{PIN}` - System prompt for the AI agent (required for non-0000 PINs)
+- `DEFAULT_GREETING_{PIN}` - Greeting message (required for non-0000 PINs)
+- `LLM_URL_{PIN}` - LLM API endpoint
+- `LLM_API_KEY_{PIN}` - LLM API key
+- `LLM_MODEL_{PIN}` - LLM model name
+- `LLM_PARAMS_{PIN}` - Additional LLM parameters (JSON)
+- `TTS_VENDOR_{PIN}` - Text-to-speech vendor
+- `TTS_KEY_{PIN}` - TTS API key
+- `TTS_MODEL_{PIN}` - TTS model name
+- `TTS_VOICE_ID_{PIN}` - TTS voice ID
+- `TTS_VOICE_STABILITY_{PIN}` - Voice stability (0-1)
+- `TTS_VOICE_SPEED_{PIN}` - Voice speed multiplier
+- `TTS_VOICE_SAMPLE_RATE_{PIN}` - Sample rate in Hz
+- `ASR_LANGUAGE_{PIN}` - ASR language
+- `ASR_VENDOR_{PIN}` - ASR vendor
+
+### Fallback Variables (Required - used for PIN 0000 and when PIN-specific versions don't exist)
+- `DEFAULT_PROMPT` - System prompt
+- `DEFAULT_GREETING` - Greeting message
+- `LLM_URL` - LLM API endpoint
+- `LLM_API_KEY` - LLM API key
+- `LLM_MODEL` - LLM model name
+- `LLM_PARAMS` - Additional LLM parameters (JSON)
+- `TTS_VENDOR` - Text-to-speech vendor
+- `TTS_KEY` - TTS API key
+- `TTS_MODEL` - TTS model name
+- `TTS_VOICE_ID` - TTS voice ID
+
+### Optional Variables (with defaults)
+- `TTS_VOICE_STABILITY` - Voice stability (default: "1")
+- `TTS_VOICE_SPEED` - Voice speed multiplier (default: "1.0")
+- `TTS_VOICE_SAMPLE_RATE` - Sample rate in Hz (default: "24000")
+- `ASR_LANGUAGE` - ASR language (default: "en-US")
+- `ASR_VENDOR` - ASR vendor (default: "deepgram")
 
 ### How to Set Environment Variables in AWS Lambda
 
