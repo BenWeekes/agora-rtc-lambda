@@ -51,7 +51,7 @@ The function uses PIN-based environment variable lookup with the following logic
 ### Agora Configuration (Required)
 - `APP_ID` - Agora App ID
 - `APP_CERTIFICATE` - Agora App Certificate (empty string if security disabled)
-- `AGENT_AUTH_HEADER` - Authorization header for Agora API
+- `AGENT_AUTH_HEADER` - Authorization header for Agora Conversation AI
 
 ### PIN-Specific Agent Variables
 All agent configuration variables can have PIN-specific versions using the format `VARIABLE_NAME_{PIN}`:
