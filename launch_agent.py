@@ -120,7 +120,7 @@ def initialize_constants(profile=None):
         
         # Advanced features
         "ENABLE_BHVS": get_env_var('ENABLE_BHVS', profile, "true"),
-        "ENABLE_RTM": get_env_var('ENABLE_RTM', profile, "false"),
+        "ENABLE_RTM": get_env_var('ENABLE_RTM', profile, "true"),
         "ENABLE_AIVAD": get_env_var('ENABLE_AIVAD', profile, "true"),
         
         # Agent settings
@@ -128,17 +128,14 @@ def initialize_constants(profile=None):
         "ENABLE_ERROR_MESSAGE": get_env_var('ENABLE_ERROR_MESSAGE', profile, "true"),
         
         # Default values for prompt and greeting
-        "DEFAULT_PROMPT": get_env_var('DEFAULT_PROMPT', profile, 
+        "DEFAULT_PROMPT": get_env_var('DEFAULT_PROMPT', profile,
             "You are a virtual companion. The user can both talk and type to you and you will be sent text. "
             "Say you can hear them if asked. They can also see you as a digital human. "
             "Keep responses to around 10 to 20 words or shorter. Be upbeat and try and keep conversation "
             "going by learning more about the user. "),
         "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there"),
         "DEFAULT_FAILURE_MESSAGE": get_env_var('DEFAULT_FAILURE_MESSAGE', profile, "An error occurred, please try again later"),
-        "DEFAULT_MAX_HISTORY": get_env_var('DEFAULT_MAX_HISTORY', profile, "32"),
-        
-        # Controller endpoint
-        "CONTROLLER_ENDPOINT": get_env_var('CONTROLLER_ENDPOINT', profile, "wss:wvc-ln-01.trulience.com")
+        "DEFAULT_MAX_HISTORY": get_env_var('DEFAULT_MAX_HISTORY', profile, "32")
     }
     
     return constants
@@ -205,10 +202,9 @@ def lambda_handler(event, context):
         
         agent_id = query_params['agent_id']
         hangup_response = hangup_agent(agent_id, constants)
-        
+
         return json_response(200, {
-            "agent_response": hangup_response,
-            "controller_endpoint": constants["CONTROLLER_ENDPOINT"]
+            "agent_response": hangup_response
         })
     
     # Normal join flow or token-only flow
@@ -256,7 +252,6 @@ def lambda_handler(event, context):
                 "uid": constants["AGENT_UID"]
             },
             "enable_string_uid": constants["ENABLE_STRING_UID"],
-            "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
             "token_generation_method": "RTC tokens with privileges" if has_certificate else "APP_ID only (no APP_CERTIFICATE)",
             "agent_response": {
                 "status_code": 200,
@@ -390,7 +385,6 @@ def lambda_handler(event, context):
             "uid": constants["AGENT_UID"]
         },
         "enable_string_uid": constants["ENABLE_STRING_UID"],
-        "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
         "agent_response": agent_response
     }
 
@@ -609,6 +603,7 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         ("channel", channel),
         ("token", agent_token),  # This should be APP_ID for ConvoAI
         ("agent_rtc_uid", constants["AGENT_UID"]),
+        ("agent_rtm_uid", constants["AGENT_UID"] + "-" + channel),
         ("remote_rtc_uids", ["*"]),
         ("advanced_features", {
             "enable_bhvs": enable_bhvs,
