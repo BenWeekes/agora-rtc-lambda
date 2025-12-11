@@ -32,7 +32,7 @@ Set the following environment variables in your Lambda function:
 | `HEYGEN_AVATAR_ID` | `Wayne_20240711` | HeyGen avatar ID (optional) |
 | `HEYGEN_QUALITY` | `high` | HeyGen quality setting |
 | `LLM_API_KEY` | `****et_****` | LLM API key |
-| `LLM_URL` | `https://sa-********:444/v1/chat/dripshop` | LLM endpoint URL |
+| `LLM_URL` | `https://sa-********:444/v1/chat/endpoint` | LLM endpoint URL |
 | `LLM_MODEL` | `llama-3.3-70b-versatile` | LLM model name |
 | `LLM_PARAMS` | `{"baseURL":"https://api.groq.com/openai/v1","apiKey":"gsk_****","model":"llama-3.3-70b-versatile","stream":true}` | Additional LLM parameters (JSON) |
 | `TTS_KEY` | `sk_****e****8b4e569` | Text-to-speech API key |
