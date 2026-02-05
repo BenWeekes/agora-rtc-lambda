@@ -7,7 +7,6 @@ from zlib import crc32
 import secrets
 import time
 import random
-import string
 from collections import OrderedDict
 import urllib.parse
 import http.client
@@ -65,14 +64,11 @@ def initialize_constants(profile=None):
         
         # Optional graph ID - omitted if not present
         "GRAPH_ID": get_env_var('GRAPH_ID', profile),
-
-        # Enable string UID setting
-        "ENABLE_STRING_UID": False,
-
+        
         # Fixed UIDs as strings
-        "AGENT_UID": "100",
-        "USER_UID": "101",
-        "AGENT_VIDEO_UID": "102",
+        "AGENT_UID": "agent",
+        "USER_UID": "user",
+        "AGENT_VIDEO_UID": "agent_video",
         
         # Constants for token generation
         "VERSION_LENGTH": 3,
@@ -92,12 +88,13 @@ def initialize_constants(profile=None):
         "TTS_VENDOR": get_env_var('TTS_VENDOR', profile),
         "TTS_KEY": get_env_var('TTS_KEY', profile),
         "TTS_MODEL": get_env_var('TTS_MODEL', profile),
+        "TTS_VOICE_ID": get_env_var('TTS_VOICE_ID', profile),
         "TTS_VOICE_STABILITY": get_env_var('TTS_VOICE_STABILITY', profile, "1"),
         "TTS_VOICE_SPEED": get_env_var('TTS_VOICE_SPEED', profile, "0.9"),
         "TTS_VOICE_SAMPLE_RATE": get_env_var('TTS_VOICE_SAMPLE_RATE', profile, "24000"),
-        "TTS_VOICE_INSTRUCTIONS": get_env_var('TTS_VOICE_INSTRUCTIONS', profile,
+        "TTS_VOICE_INSTRUCTIONS": get_env_var('TTS_VOICE_INSTRUCTIONS', profile, 
             "Please use standard American English, natural tone, moderate pace, and steady intonation"),
-
+        
         # Rime TTS specific settings
         "RIME_API_KEY": get_env_var('RIME_API_KEY', profile),
         "RIME_SPEAKER": get_env_var('RIME_SPEAKER', profile, "astra"),
@@ -105,31 +102,10 @@ def initialize_constants(profile=None):
         "RIME_LANG": get_env_var('RIME_LANG', profile, "eng"),
         "RIME_SAMPLING_RATE": get_env_var('RIME_SAMPLING_RATE', profile, "16000"),
         "RIME_SPEED_ALPHA": get_env_var('RIME_SPEED_ALPHA', profile, "1.0"),
-
-        # Cartesia TTS specific settings
-        "CARTESIA_API_KEY": get_env_var('CARTESIA_API_KEY', profile),
-        "CARTESIA_MODEL": get_env_var('CARTESIA_MODEL', profile, "sonic-3"),
-        "CARTESIA_VOICE_ID": get_env_var('CARTESIA_VOICE_ID', profile),
-        "CARTESIA_SAMPLE_RATE": get_env_var('CARTESIA_SAMPLE_RATE', profile, "24000"),
-
-        # ElevenLabs specific settings
-        "ELEVENLABS_MODEL": get_env_var('ELEVENLABS_MODEL', profile, "eleven_flash_v2_5"),
-        "ELEVENLABS_STABILITY": get_env_var('ELEVENLABS_STABILITY', profile, "0.5"),
-    }
-
-    # Add TTS_VOICE_ID with fallbacks to vendor-specific voice IDs
-    # This allows using a single TTS_VOICE_ID variable for all vendors
-    constants["TTS_VOICE_ID"] = (
-        get_env_var('TTS_VOICE_ID', profile) or
-        constants.get("RIME_SPEAKER") or
-        constants.get("CARTESIA_VOICE_ID")
-    )
-
-    # Continue with remaining constants
-    constants.update({
+        
         # Define ASR settings
         "ASR_LANGUAGE": get_env_var('ASR_LANGUAGE', profile, "en-US"),
-        "ASR_VENDOR": get_env_var('ASR_VENDOR', profile, "ares"),
+        "ASR_VENDOR": get_env_var('ASR_VENDOR', profile, "deepgram"),
         "DEEPGRAM_URL": get_env_var('DEEPGRAM_URL', profile, "wss://api.deepgram.com/v1/listen"),
         "DEEPGRAM_KEY": get_env_var('DEEPGRAM_KEY', profile),
         "DEEPGRAM_MODEL": get_env_var('DEEPGRAM_MODEL', profile, "nova-3"),
@@ -140,38 +116,28 @@ def initialize_constants(profile=None):
         
         # Advanced features
         "ENABLE_BHVS": get_env_var('ENABLE_BHVS', profile, "true"),
-        "ENABLE_RTM": get_env_var('ENABLE_RTM', profile, "true"),
+        "ENABLE_RTM": get_env_var('ENABLE_RTM', profile, "false"),
         "ENABLE_AIVAD": get_env_var('ENABLE_AIVAD', profile, "true"),
         
         # Agent settings
-        "IDLE_TIMEOUT": get_env_var('IDLE_TIMEOUT', profile, "120"),
+        "IDLE_TIMEOUT": get_env_var('IDLE_TIMEOUT', profile, "15"),
         "ENABLE_ERROR_MESSAGE": get_env_var('ENABLE_ERROR_MESSAGE', profile, "true"),
         
         # Default values for prompt and greeting
-        "DEFAULT_PROMPT": get_env_var('DEFAULT_PROMPT', profile,
+        "DEFAULT_PROMPT": get_env_var('DEFAULT_PROMPT', profile, 
             "You are a virtual companion. The user can both talk and type to you and you will be sent text. "
             "Say you can hear them if asked. They can also see you as a digital human. "
             "Keep responses to around 10 to 20 words or shorter. Be upbeat and try and keep conversation "
             "going by learning more about the user. "),
         "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there"),
         "DEFAULT_FAILURE_MESSAGE": get_env_var('DEFAULT_FAILURE_MESSAGE', profile, "An error occurred, please try again later"),
-        "DEFAULT_MAX_HISTORY": get_env_var('DEFAULT_MAX_HISTORY', profile, "32")
-    })
-
+        "DEFAULT_MAX_HISTORY": get_env_var('DEFAULT_MAX_HISTORY', profile, "32"),
+        
+        # Controller endpoint
+        "CONTROLLER_ENDPOINT": get_env_var('CONTROLLER_ENDPOINT', profile, "wss:wvc-ln-01.trulience.com")
+    }
+    
     return constants
-
-
-def generate_random_channel(length=10):
-    """
-    Generates a random channel name with uppercase letters and numbers
-
-    Args:
-        length: Length of the channel name (default: 10)
-
-    Returns:
-        Random channel name string
-    """
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 
 def lambda_handler(event, context):
@@ -179,8 +145,11 @@ def lambda_handler(event, context):
     Lambda handler function that processes the incoming request, generates tokens,
     and sends an agent to the channel or handles hangup requests.
     """
-    # Check if queryStringParameters exists, use empty dict if not
-    query_params = event.get('queryStringParameters') or {}
+    # Check if queryStringParameters exists
+    if 'queryStringParameters' not in event or event['queryStringParameters'] is None:
+        return json_response(400, {"error": "Missing query parameters"})
+    
+    query_params = event['queryStringParameters']
     
     # Get the optional profile parameter
     profile = query_params.get('profile')
@@ -222,17 +191,18 @@ def lambda_handler(event, context):
         
         agent_id = query_params['agent_id']
         hangup_response = hangup_agent(agent_id, constants)
-
+        
         return json_response(200, {
-            "agent_response": hangup_response
+            "agent_response": hangup_response,
+            "controller_endpoint": constants["CONTROLLER_ENDPOINT"]
         })
     
     # Normal join flow or token-only flow
-    # Get channel from query parameters, or generate random one if not provided
-    if 'channel' in query_params and query_params['channel']:
-        channel = query_params['channel']
-    else:
-        channel = generate_random_channel(10)
+    # Get channel from query parameters
+    if 'channel' not in query_params:
+        return json_response(400, {"error": "Missing channel parameter"})
+    
+    channel = query_params['channel']
     
     # Check if this is a connect=false request (token-only mode)
     connect_param = query_params.get('connect', 'true').lower()
@@ -261,18 +231,9 @@ def lambda_handler(event, context):
     # If connect=false, return only the user token and agent video token without starting the agent
     if token_only_mode:
         return json_response(200, {
-            "audio_scenario": "10",
-            "token": user_token_data["token"],
-            "uid": user_token_data["uid"],
-            "channel": channel,
-            "appid": constants["APP_ID"],
             "user_token": user_token_data,
             "agent_video_token": agent_video_token_data,
-            "agent": {
-                "uid": constants["AGENT_UID"]
-            },
-            "agent_rtm_uid": f"{constants['AGENT_UID']}-{channel}",
-            "enable_string_uid": constants["ENABLE_STRING_UID"],
+            "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
             "token_generation_method": "RTC tokens with privileges" if has_certificate else "APP_ID only (no APP_CERTIFICATE)",
             "agent_response": {
                 "status_code": 200,
@@ -338,48 +299,45 @@ def lambda_handler(event, context):
     
     # FIXED: For ConvoAI agent, use APP_ID as the token (not a generated RTC token)
     agent_token = constants["APP_ID"]
-
-    # Create the agent payload with error handling
-    try:
-        agent_payload = create_agent_payload(
-            channel=channel,
-            agent_token=agent_token,  # Using APP_ID as token
-            prompt=prompt,
-            greeting=greeting,
-            failure_message=failure_message,
-            max_history=max_history,
-            tts_vendor=tts_vendor,
-            llm_url=llm_url,
-            llm_api_key=llm_api_key,
-            llm_model=llm_model,
-            asr_vendor=asr_vendor,
-            deepgram_url=deepgram_url,
-            deepgram_key=deepgram_key,
-            deepgram_model=deepgram_model,
-            deepgram_language=deepgram_language,
-            vad_silence_duration=vad_silence_duration,
-            enable_bhvs=enable_bhvs,
-            enable_rtm=enable_rtm,
-            enable_aivad=enable_aivad,
-            idle_timeout=idle_timeout,
-            enable_error_message=enable_error_message,
-            constants=constants,
-            # Rime TTS parameters
-            rime_api_key=rime_api_key if tts_vendor == "rime" else None,
-            rime_speaker=rime_speaker if tts_vendor == "rime" else None,
-            rime_model_id=rime_model_id if tts_vendor == "rime" else None,
-            rime_lang=rime_lang if tts_vendor == "rime" else None,
-            rime_sampling_rate=rime_sampling_rate if tts_vendor == "rime" else None,
-            rime_speed_alpha=rime_speed_alpha if tts_vendor == "rime" else None,
-            # Other TTS parameters
-            voice_id=voice_id if tts_vendor != "rime" else None,
-            voice_stability=voice_stability if tts_vendor != "rime" else None,
-            voice_speed=voice_speed if tts_vendor != "rime" else None,
-            voice_sample_rate=voice_sample_rate if tts_vendor != "rime" else None,
-            voice_instructions=voice_instructions if tts_vendor != "rime" else None
-        )
-    except ValueError as e:
-        return json_response(400, {"error": str(e)})
+    
+    # Create the agent payload
+    agent_payload = create_agent_payload(
+        channel=channel,
+        agent_token=agent_token,  # Using APP_ID as token
+        prompt=prompt,
+        greeting=greeting,
+        failure_message=failure_message,
+        max_history=max_history,
+        tts_vendor=tts_vendor,
+        llm_url=llm_url,
+        llm_api_key=llm_api_key,
+        llm_model=llm_model,
+        asr_vendor=asr_vendor,
+        deepgram_url=deepgram_url,
+        deepgram_key=deepgram_key,
+        deepgram_model=deepgram_model,
+        deepgram_language=deepgram_language,
+        vad_silence_duration=vad_silence_duration,
+        enable_bhvs=enable_bhvs,
+        enable_rtm=enable_rtm,
+        enable_aivad=enable_aivad,
+        idle_timeout=idle_timeout,
+        enable_error_message=enable_error_message,
+        constants=constants,
+        # Rime TTS parameters
+        rime_api_key=rime_api_key if tts_vendor == "rime" else None,
+        rime_speaker=rime_speaker if tts_vendor == "rime" else None,
+        rime_model_id=rime_model_id if tts_vendor == "rime" else None,
+        rime_lang=rime_lang if tts_vendor == "rime" else None,
+        rime_sampling_rate=rime_sampling_rate if tts_vendor == "rime" else None,
+        rime_speed_alpha=rime_speed_alpha if tts_vendor == "rime" else None,
+        # Other TTS parameters
+        voice_id=voice_id if tts_vendor != "rime" else None,
+        voice_stability=voice_stability if tts_vendor != "rime" else None,
+        voice_speed=voice_speed if tts_vendor != "rime" else None,
+        voice_sample_rate=voice_sample_rate if tts_vendor != "rime" else None,
+        voice_instructions=voice_instructions if tts_vendor != "rime" else None
+    )
     
     # Send the agent to the channel
     agent_response = send_agent_to_channel(channel, agent_payload, constants)
@@ -398,24 +356,15 @@ def lambda_handler(event, context):
     
     # Return response with all tokens and agent status
     response_data = {
-        "audio_scenario": "10",
-        "token": user_token_data["token"],
-        "uid": user_token_data["uid"],
-        "channel": channel,
-        "appid": constants["APP_ID"],
         "user_token": user_token_data,
         "agent_video_token": agent_video_token_data,
-        "agent": {
-            "uid": constants["AGENT_UID"]
-        },
-        "agent_rtm_uid": f"{constants['AGENT_UID']}-{channel}",
-        "enable_string_uid": constants["ENABLE_STRING_UID"],
+        "controller_endpoint": constants["CONTROLLER_ENDPOINT"],
         "agent_response": agent_response
     }
-
+    
     if debug_info:
         response_data["debug"] = debug_info
-
+    
     return json_response(200, response_data)
 
 
@@ -424,7 +373,10 @@ def json_response(status_code, body):
     return {
         "statusCode": status_code,
         "headers": {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
         },
         "body": json.dumps(body)
     }
@@ -556,18 +508,12 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         OrderedDict containing the complete agent payload
     """
     
-    # Validate TTS vendor
-    if not tts_vendor:
-        raise ValueError("TTS_VENDOR must be set via environment variable or query parameter")
-
     # Build TTS configuration based on vendor
     tts_config = {
         "vendor": tts_vendor
     }
-
+    
     if tts_vendor == "rime":
-        if not rime_api_key:
-            raise ValueError("RIME_API_KEY is required when TTS_VENDOR=rime")
         tts_config["skip_patterns"] = [5]
         tts_config["params"] = {
             "api_key": rime_api_key,
@@ -578,65 +524,33 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
             "speedAlpha": float(rime_speed_alpha)
         }
     elif tts_vendor == "elevenlabs":
-        if not constants.get("TTS_KEY"):
-            raise ValueError("TTS_KEY is required when TTS_VENDOR=elevenlabs")
-        if not voice_id:
-            raise ValueError("TTS_VOICE_ID is required when TTS_VENDOR=elevenlabs")
         tts_config["params"] = {
             "voice_id": voice_id,
-            "model_id": constants["ELEVENLABS_MODEL"],
+            "model_id": "eleven_turbo_v2_5",
             "optimize_streaming_latency": 3,
-            "stability": float(voice_stability if voice_stability else constants["ELEVENLABS_STABILITY"]),
+            "stability": float(voice_stability),
             "output_format": f"pcm_{voice_sample_rate}"
         }
     elif tts_vendor == "openai":
-        if not constants.get("TTS_KEY"):
-            raise ValueError("TTS_KEY is required when TTS_VENDOR=openai")
-        if not voice_id:
-            raise ValueError("TTS_VOICE_ID is required when TTS_VENDOR=openai")
         tts_config["params"] = {
             "model": "tts-1",
             "voice": voice_id,
             "response_format": "pcm",
             "speed": float(voice_speed)
         }
-    elif tts_vendor == "cartesia":
-        if not constants.get("CARTESIA_API_KEY"):
-            raise ValueError("CARTESIA_API_KEY is required when TTS_VENDOR=cartesia")
-        if not (voice_id or constants.get("CARTESIA_VOICE_ID")):
-            raise ValueError("CARTESIA_VOICE_ID is required when TTS_VENDOR=cartesia")
-        tts_config["params"] = {
-            "api_key": constants["CARTESIA_API_KEY"],
-            "model_id": constants["CARTESIA_MODEL"],
-            "sample_rate": int(voice_sample_rate if voice_sample_rate else constants["CARTESIA_SAMPLE_RATE"]),
-            "voice": {
-                "mode": "id",
-                "id": voice_id if voice_id else constants["CARTESIA_VOICE_ID"]
-            }
-        }
-    else:
-        raise ValueError(f"Unsupported TTS vendor: {tts_vendor}. Supported vendors: rime, elevenlabs, openai, cartesia")
-
+    
     # Build ASR configuration
     asr_config = {
         "vendor": asr_vendor
     }
-
-    if asr_vendor == "ares":
-        # Ares is Agora's built-in ASR, just needs language
-        asr_config["language"] = constants["ASR_LANGUAGE"]
-    elif asr_vendor == "deepgram":
-        if not deepgram_key:
-            raise ValueError("DEEPGRAM_KEY is required when ASR_VENDOR=deepgram")
+    
+    if asr_vendor == "deepgram":
         asr_config["params"] = {
             "url": deepgram_url,
             "key": deepgram_key,
             "model": deepgram_model,
             "language": deepgram_language
         }
-    else:
-        # Default fallback - just set language
-        asr_config["language"] = constants["ASR_LANGUAGE"]
     
     # Build LLM configuration
     llm_config = {
@@ -665,8 +579,7 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         }),
         ("channel", channel),
         ("token", agent_token),  # This should be APP_ID for ConvoAI
-        ("agent_rtc_uid", constants["AGENT_UID"]),
-        ("agent_rtm_uid", constants["AGENT_UID"] + "-" + channel),
+        ("agent_rtc_uid", "0"),
         ("remote_rtc_uids", ["*"]),
         ("advanced_features", {
             "enable_bhvs": enable_bhvs,
