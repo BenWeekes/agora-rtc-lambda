@@ -382,13 +382,6 @@ LLM_MODEL=gpt-4o-mini
 - Check token hasn't expired (24h default)
 - Ensure UID matches between client and token
 
-## Related Files
-
-- `lambda_function.py` - Simple RTC token generation
-- `lambda_function_convoAI.py` - ConvoAI integration
-- `lambda_function_convoAI_pstn.py` - PSTN-specific variant
-- `lambda_function_convoAI_pstn2.py` - PSTN variant 2
-
 ## License
 
 See repository license.
