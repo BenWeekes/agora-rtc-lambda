@@ -5,7 +5,7 @@ AWS Lambda function for launching Agora ConvoAI agents with configurable TTS, ST
 ## Features
 
 - **Multi-vendor TTS support**: Rime, ElevenLabs, OpenAI, Cartesia
-- **Deepgram STT integration**: Configurable speech-to-text with multiple models
+- **Multi-vendor STT support**: Ares (Agora built-in), Deepgram
 - **Flexible LLM backend**: Any OpenAI-compatible API
 - **Profile-based configuration**: Support multiple agent configurations via profiles
 - **Token-only mode**: Generate tokens without starting an agent
@@ -48,17 +48,23 @@ TTS_VOICE_SPEED=1.0 (default: 0.25-4.0)
 ```
 TTS_VENDOR=cartesia
 CARTESIA_API_KEY=your_api_key
-CARTESIA_MODEL=sonic-english (default)
+CARTESIA_MODEL=sonic-3 (default)
 CARTESIA_VOICE_ID=your_voice_id
 CARTESIA_SAMPLE_RATE=24000 (default)
 ```
 
 ### Speech-to-Text (STT/ASR)
 
-#### Deepgram (default)
+#### Ares (default)
+Agora's built-in ASR - no API key required:
 ```
-ASR_VENDOR=deepgram (default)
-DEEPGRAM_URL=wss://api.deepgram.com/v1/listen (default)
+ASR_VENDOR=ares (default)
+ASR_LANGUAGE=en-US (default)
+```
+
+#### Deepgram
+```
+ASR_VENDOR=deepgram
 DEEPGRAM_KEY=your_api_key
 DEEPGRAM_MODEL=nova-3 (default)
 DEEPGRAM_LANGUAGE=en (default)
@@ -90,6 +96,10 @@ See provider-specific settings above.
 
 ### STT Configuration
 ```bash
+# Default: Ares (no API key needed)
+ASR_VENDOR=ares
+
+# Or use Deepgram:
 ASR_VENDOR=deepgram
 DEEPGRAM_KEY=your_deepgram_key
 DEEPGRAM_MODEL=nova-3
@@ -114,7 +124,7 @@ ENABLE_AIVAD=true
 ENABLE_ERROR_MESSAGE=true
 
 # Agent Settings
-IDLE_TIMEOUT=15
+IDLE_TIMEOUT=120
 
 # Optional Graph ID
 GRAPH_ID=your_graph_id
@@ -151,7 +161,7 @@ GET /?channel=my_channel
 # - profile: Configuration profile to use
 # - prompt: Override system prompt
 # - greeting: Override greeting message
-# - tts_vendor: rime|elevenlabs|openai
+# - tts_vendor: rime|elevenlabs|openai|cartesia
 # - voice_id: TTS voice identifier
 # - llm_model: Override LLM model
 # - debug: Include debug information
@@ -176,6 +186,7 @@ GET /?channel=my_channel
   "agent": {
     "uid": "100"
   },
+  "agent_rtm_uid": "100-my_channel",
   "enable_string_uid": false,
   "agent_response": {
     "status_code": 200,
@@ -213,6 +224,7 @@ GET /?connect=false
   "agent": {
     "uid": "100"
   },
+  "agent_rtm_uid": "100-AUTOGEN123",
   "enable_string_uid": false,
   "token_generation_method": "RTC tokens with privileges",
   "agent_response": {
@@ -300,7 +312,7 @@ Returns `APP_ID` as token (testing mode only).
 
 ### Handler
 ```
-lambda_function.lambda_handler
+launch_agent.lambda_handler
 ```
 
 ### Recommended Settings
@@ -347,7 +359,7 @@ LLM_MODEL=your-custom-model
 ```bash
 TTS_VENDOR=cartesia
 CARTESIA_API_KEY=...
-CARTESIA_MODEL=sonic-english
+CARTESIA_MODEL=sonic-3
 CARTESIA_VOICE_ID=...
 CARTESIA_SAMPLE_RATE=24000
 
