@@ -3,7 +3,7 @@ import hmac
 from hashlib import sha256
 import base64
 import struct
-from zlib import crc32
+import zlib
 import secrets
 import time
 import random
@@ -336,14 +336,21 @@ def lambda_handler(event, context):
     idle_timeout = query_params.get('idle_timeout', constants["IDLE_TIMEOUT"])
     enable_error_message = query_params.get('enable_error_message', constants["ENABLE_ERROR_MESSAGE"]).lower() == "true"
     
-    # FIXED: For ConvoAI agent, use APP_ID as the token (not a generated RTC token)
-    agent_token = constants["APP_ID"]
+    # Generate agent token with split RTC/RTM UIDs
+    agent_rtm_uid = f"{constants['AGENT_UID']}-{channel}"
+    if has_certificate:
+        agent_token_info = build_token_with_rtm(
+            channel, constants["AGENT_UID"], constants, rtm_uid=agent_rtm_uid
+        )
+        agent_token = agent_token_info["token"]
+    else:
+        agent_token = constants["APP_ID"]
 
     # Create the agent payload with error handling
     try:
         agent_payload = create_agent_payload(
             channel=channel,
-            agent_token=agent_token,  # Using APP_ID as token
+            agent_token=agent_token,
             prompt=prompt,
             greeting=greeting,
             failure_message=failure_message,
@@ -453,7 +460,7 @@ def hangup_agent(agent_id, constants):
     conn = http.client.HTTPSConnection(host, timeout=30)  # 30 second timeout
     
     headers = {
-        "Authorization": constants["AGENT_AUTH_HEADER"]
+        "Authorization": build_auth_header(constants)
     }
     
     conn.request("DELETE", path, headers=headers)
@@ -473,36 +480,56 @@ def hangup_agent(agent_id, constants):
     }
 
 
-def build_token_with_rtm(channel, uid, constants):
+def build_auth_header(constants):
     """
-    Builds a token with both RTC and RTM capabilities
-    
+    Builds the Authorization header for Agora ConvoAI API calls.
+
+    If AGENT_AUTH_HEADER is set, uses it directly (Basic auth).
+    Otherwise generates a v007 token using APP_ID + APP_CERTIFICATE
+    and returns 'agora token=<token>' format.
+    """
+    auth_header = constants.get("AGENT_AUTH_HEADER", "")
+    if auth_header and auth_header.strip():
+        return auth_header
+
+    # Generate v007 token for auth (use empty channel for API-level auth)
+    token_data = build_token_with_rtm("", constants["APP_ID"], constants)
+    return f"agora token={token_data['token']}"
+
+
+def build_token_with_rtm(channel, uid, constants, rtm_uid=None):
+    """
+    Builds a v007 token with both RTC and RTM services.
+
     Args:
         channel: The channel name
-        uid: The user ID (string)
+        uid: The user ID (string, used for RTC service)
         constants: Dictionary of constants
-    
+        rtm_uid: Optional separate UID for RTM service (defaults to uid)
+
     Returns:
         Dictionary with token and uid
     """
-    # Create token with RTC capabilities
-    token = AccessToken(constants["APP_ID"], constants["APP_CERTIFICATE"], channel, uid)
-    
-    # Add RTC privileges
-    token.addPrivilege(1, int(time.time()) + constants["PRIVILEGE_EXPIRE"])  # JOIN_CHANNEL
-    token.addPrivilege(2, int(time.time()) + constants["PRIVILEGE_EXPIRE"])  # PUBLISH_AUDIO_STREAM
-    token.addPrivilege(3, int(time.time()) + constants["PRIVILEGE_EXPIRE"])  # PUBLISH_VIDEO_STREAM
-    token.addPrivilege(4, int(time.time()) + constants["PRIVILEGE_EXPIRE"])  # PUBLISH_DATA_STREAM
-    
-    # Add RTM privileges
-    token.addPrivilege(1000, int(time.time()) + constants["PRIVILEGE_EXPIRE"])  # RTM_LOGIN
-    
-    built_token = token.build()
-    
-    return {
-        "token": built_token,
-        "uid": uid
-    }
+    # Return APP_ID as token if APP_CERTIFICATE is empty
+    if not constants["APP_CERTIFICATE"]:
+        return {"token": constants["APP_ID"], "uid": uid}
+
+    token = AccessToken007(constants["APP_ID"], constants["APP_CERTIFICATE"])
+
+    # RTC Service
+    rtc_service = ServiceRtc(channel, uid)
+    rtc_service.add_privilege(ServiceRtc.kPrivilegeJoinChannel, constants["PRIVILEGE_EXPIRE"])
+    rtc_service.add_privilege(ServiceRtc.kPrivilegePublishAudioStream, constants["PRIVILEGE_EXPIRE"])
+    rtc_service.add_privilege(ServiceRtc.kPrivilegePublishVideoStream, constants["PRIVILEGE_EXPIRE"])
+    rtc_service.add_privilege(ServiceRtc.kPrivilegePublishDataStream, constants["PRIVILEGE_EXPIRE"])
+    token.add_service(rtc_service)
+
+    # RTM Service — uses rtm_uid if provided (e.g. "100-channel" for agent)
+    rtm_service = ServiceRtm(rtm_uid if rtm_uid else uid)
+    rtm_service.add_privilege(ServiceRtm.kPrivilegeLogin, constants["TOKEN_EXPIRE"])
+    token.add_service(rtm_service)
+
+    return {"token": token.build(), "uid": uid}
 
 
 def create_agent_payload(channel, agent_token, prompt, greeting, failure_message, max_history,
@@ -519,7 +546,7 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
     
     Args:
         channel: The channel name
-        agent_token: The agent's token (should be APP_ID for ConvoAI)
+        agent_token: The agent's token (v007 token or APP_ID if no certificate)
         prompt: The system prompt for the LLM
         greeting: The greeting message
         failure_message: The failure message
@@ -664,14 +691,15 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
             "enable_error_message": enable_error_message
         }),
         ("channel", channel),
-        ("token", agent_token),  # This should be APP_ID for ConvoAI
+        ("token", agent_token),
         ("agent_rtc_uid", constants["AGENT_UID"]),
         ("agent_rtm_uid", constants["AGENT_UID"] + "-" + channel),
         ("remote_rtc_uids", ["*"]),
         ("advanced_features", {
             "enable_bhvs": enable_bhvs,
             "enable_rtm": enable_rtm,
-            "enable_aivad": enable_aivad
+            "enable_aivad": enable_aivad,
+            "enable_sal": True
         }),
         ("enable_string_uid", False),
         ("idle_timeout", int(idle_timeout)),
@@ -714,9 +742,9 @@ def send_agent_to_channel(channel, agent_payload, constants):
     
     headers = {
         "Content-Type": "application/json",
-        "Authorization": constants["AGENT_AUTH_HEADER"]
+        "Authorization": build_auth_header(constants)
     }
-    
+
     # Convert the payload to JSON
     payload_json = json.dumps(agent_payload, indent=2)
     
@@ -745,160 +773,130 @@ def send_agent_to_channel(channel, agent_payload, constants):
     }
 
 
-def getVersion():
-    """Returns the version string for the token"""
-    return '006'
-
-
-def packUint16(x):
-    """Packs an unsigned 16-bit integer"""
+def pack_uint16(x):
     return struct.pack('<H', int(x))
 
 
-def packUint32(x):
-    """Packs an unsigned 32-bit integer"""
+def pack_uint32(x):
     return struct.pack('<I', int(x))
 
 
-def packInt32(x):
-    """Packs a signed 32-bit integer"""
-    return struct.pack('<i', int(x))
+def pack_string(string):
+    if isinstance(string, str):
+        string = string.encode('utf-8')
+    return pack_uint16(len(string)) + string
 
 
-def packString(string):
-    """Packs a string with its length prefix"""
-    return packUint16(len(string)) + string
+def pack_map_uint32(m):
+    return pack_uint16(len(m)) + b''.join([pack_uint16(k) + pack_uint32(v) for k, v in m.items()])
 
 
-def packMap(m):
-    """Packs a map of key-value pairs where values are strings"""
-    ret = packUint16(len(list(m.items())))
-    for k, v in list(m.items()):
-        ret += packUint16(k) + packString(v)
-    return ret
+class Service:
+    """Base class for v007 token services."""
+
+    def __init__(self, service_type):
+        self.__type = service_type
+        self.__privileges = {}
+
+    def __pack_type(self):
+        return pack_uint16(self.__type)
+
+    def __pack_privileges(self):
+        privileges = OrderedDict(
+            sorted(iter(self.__privileges.items()), key=lambda x: int(x[0])))
+        return pack_map_uint32(privileges)
+
+    def add_privilege(self, privilege, expire):
+        self.__privileges[privilege] = expire
+
+    def service_type(self):
+        return self.__type
+
+    def pack(self):
+        return self.__pack_type() + self.__pack_privileges()
 
 
-def packMapUint32(m):
-    """Packs a map of key-value pairs where values are uint32"""
-    ret = packUint16(len(list(m.items())))
-    for k, v in list(m.items()):
-        ret += packUint16(k) + packUint32(v)
-    return ret
+class ServiceRtc(Service):
+    """RTC service for v007 token generation."""
+
+    kServiceType = 1
+    kPrivilegeJoinChannel = 1
+    kPrivilegePublishAudioStream = 2
+    kPrivilegePublishVideoStream = 3
+    kPrivilegePublishDataStream = 4
+
+    def __init__(self, channel_name='', uid=0):
+        super(ServiceRtc, self).__init__(ServiceRtc.kServiceType)
+        self.__channel_name = channel_name.encode('utf-8')
+        self.__uid = b'' if uid == 0 else str(uid).encode('utf-8')
+
+    def pack(self):
+        return super(ServiceRtc, self).pack() + pack_string(self.__channel_name) + pack_string(self.__uid)
 
 
-class ReadByteBuffer:
-    """Helper class for unpacking binary data"""
-    def __init__(self, bytes):
-        self.buffer = bytes
-        self.position = 0
+class ServiceRtm(Service):
+    """RTM service for v007 token generation."""
 
-    def unPackUint16(self):
-        len = struct.calcsize('H')
-        buff = self.buffer[self.position: self.position + len]
-        ret = struct.unpack('<H', buff)[0]
-        self.position += len
-        return ret
+    kServiceType = 2
+    kPrivilegeLogin = 1
 
-    def unPackUint32(self):
-        len = struct.calcsize('I')
-        buff = self.buffer[self.position: self.position + len]
-        ret = struct.unpack('<I', buff)[0]
-        self.position += len
-        return ret
+    def __init__(self, user_id=''):
+        super(ServiceRtm, self).__init__(ServiceRtm.kServiceType)
+        self.__user_id = user_id.encode('utf-8')
 
-    def unPackString(self):
-        strlen = self.unPackUint16()
-        buff = self.buffer[self.position: self.position + strlen]
-        ret = struct.unpack('<' + str(strlen) + 's', buff)[0]
-        self.position += strlen
-        return ret
-
-    def unPackMapUint32(self):
-        messages = {}
-        maplen = self.unPackUint16()
-
-        for index in range(maplen):
-            key = self.unPackUint16()
-            value = self.unPackUint32()
-            messages[key] = value
-        return messages
+    def pack(self):
+        return super(ServiceRtm, self).pack() + pack_string(self.__user_id)
 
 
-def unPackContent(buff):
-    """Unpacks the content portion of a token"""
-    readbuf = ReadByteBuffer(buff)
-    signature = readbuf.unPackString()
-    crc_channel_name = readbuf.unPackUint32()
-    crc_uid = readbuf.unPackUint32()
-    m = readbuf.unPackString()
-    return signature, crc_channel_name, crc_uid, m
+class AccessToken007:
+    """Access token generator using v007 service-based architecture."""
 
+    def __init__(self, app_id='', app_certificate='', issue_ts=0, expire=900):
+        self.__app_id = app_id
+        self.__app_cert = app_certificate
+        self.__issue_ts = issue_ts if issue_ts != 0 else int(time.time())
+        self.__expire = expire
+        self.__salt = secrets.SystemRandom().randint(1, 99999999)
+        self.__service = {}
 
-def unPackMessages(buff):
-    """Unpacks the messages portion of a token"""
-    readbuf = ReadByteBuffer(buff)
-    salt = readbuf.unPackUint32()
-    ts = readbuf.unPackUint32()
-    messages = readbuf.unPackMapUint32()
-    return salt, ts, messages
+    def __signing(self):
+        signing = hmac.new(pack_uint32(self.__issue_ts), self.__app_cert, sha256).digest()
+        signing = hmac.new(pack_uint32(self.__salt), signing, sha256).digest()
+        return signing
 
-
-class AccessToken:
-    """
-    Class for building and parsing Agora access tokens
-    """
-    def __init__(self, appID='', appCertificate='', channelName='', uid=''):
-        self.appID = appID
-        self.appCertificate = appCertificate
-        self.channelName = channelName
-        self.ts = int(time.time()) + 24 * 3600
-        self.salt = secrets.SystemRandom().randint(1, 99999999)
-        self.messages = {}
-        if uid == 0 or uid == "":
-            self.uidStr = ""
-        else:
-            self.uidStr = str(uid)
-
-    def addPrivilege(self, privilege, expireTimestamp):
-        """Adds a privilege to the token"""
-        self.messages[privilege] = expireTimestamp
-
-    def fromString(self, originToken):
-        """Parses a token from a string"""
-        try:
-            dk6version = getVersion()
-            originVersion = originToken[:VERSION_LENGTH]
-            if (originVersion != dk6version):
+    def __build_check(self):
+        def is_uuid(data):
+            if len(data) != 32:
                 return False
+            try:
+                bytes.fromhex(data)
+            except:
+                return False
+            return True
 
-            originAppID = originToken[VERSION_LENGTH:(VERSION_LENGTH + APP_ID_LENGTH)]
-            originContent = originToken[(VERSION_LENGTH + APP_ID_LENGTH):]
-            originContentDecoded = base64.b64decode(originContent)
-            signature, crc_channel_name, crc_uid, m = unPackContent(originContentDecoded)
-            self.salt, self.ts, self.messages = unPackMessages(m)
-
-        except Exception as e:
-            print("error:", str(e))
+        if not is_uuid(self.__app_id) or not is_uuid(self.__app_cert):
             return False
-
+        if not self.__service:
+            return False
         return True
 
+    def add_service(self, service):
+        self.__service[service.service_type()] = service
+
     def build(self):
-        """Builds a token string"""
-        self.messages = OrderedDict(sorted(iter(self.messages.items()), key=lambda x: int(x[0])))
-        m = packUint32(self.salt) + packUint32(self.ts) \
-            + packMapUint32(self.messages)
+        if not self.__build_check():
+            return ''
 
-        val = self.appID.encode('utf-8') + self.channelName.encode('utf-8') + self.uidStr.encode('utf-8') + m
-        signature = hmac.new(self.appCertificate.encode('utf-8'), val, sha256).digest()
-        crc_channel_name = crc32(self.channelName.encode('utf-8')) & 0xffffffff
-        crc_uid = crc32(self.uidStr.encode('utf-8')) & 0xffffffff
-        content = packString(signature) \
-                  + packUint32(crc_channel_name) \
-                  + packUint32(crc_uid) \
-                  + packString(m)
+        self.__app_id = self.__app_id.encode('utf-8')
+        self.__app_cert = self.__app_cert.encode('utf-8')
+        signing = self.__signing()
+        signing_info = pack_string(self.__app_id) + pack_uint32(self.__issue_ts) + pack_uint32(self.__expire) + \
+                       pack_uint32(self.__salt) + pack_uint16(len(self.__service))
 
-        version = getVersion()
-        ret = version + self.appID + base64.b64encode(content).decode('utf-8')
-        return ret
+        for _, service in self.__service.items():
+            signing_info += service.pack()
+
+        signature = hmac.new(signing, signing_info, sha256).digest()
+
+        return '007' + base64.b64encode(zlib.compress(pack_string(signature) + signing_info)).decode('utf-8')
 

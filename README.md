@@ -84,12 +84,25 @@ LLM_MODEL=gpt-4o-mini
 ### Required
 ```bash
 APP_ID=your_agora_app_id
-APP_CERTIFICATE=your_agora_app_certificate
-AGENT_AUTH_HEADER=your_agent_auth_header
 LLM_URL=your_llm_endpoint
 LLM_API_KEY=your_llm_api_key
 LLM_MODEL=your_model_name
 ```
+
+### Authentication (one of the following)
+```bash
+# Option 1: APP_CERTIFICATE (recommended)
+# Generates v007 tokens for both API auth and channel join.
+# API calls use "agora token=<v007_token>" authorization.
+APP_CERTIFICATE=your_agora_app_certificate
+
+# Option 2: AGENT_AUTH_HEADER (Basic auth)
+# Uses Basic auth for API calls, APP_ID as channel join token.
+AGENT_AUTH_HEADER=Basic <base64_key:secret>
+```
+
+If both are set, `AGENT_AUTH_HEADER` takes priority for API auth.
+If neither is set, API calls will fail (APP_ID alone is not valid for API auth).
 
 ### TTS Configuration (choose one vendor)
 See provider-specific settings above.
@@ -295,18 +308,21 @@ ENABLE_ERROR_MESSAGE=true
 
 ## Token Generation
 
+Uses v007 service-based tokens with separate RTC and RTM services.
+
 ### With APP_CERTIFICATE
-Generates full RTC tokens with privileges:
-- JOIN_CHANNEL (privilege 1)
-- PUBLISH_AUDIO_STREAM (privilege 2)
-- PUBLISH_VIDEO_STREAM (privilege 3)
-- PUBLISH_DATA_STREAM (privilege 4)
-- RTM_LOGIN (privilege 1000)
+Generates v007 tokens with independent RTC and RTM UIDs:
+- **RTC Service**: JOIN_CHANNEL, PUBLISH_AUDIO/VIDEO/DATA_STREAM privileges
+- **RTM Service**: LOGIN privilege with separate RTM UID (`{agent_uid}-{channel}`)
+
+The agent token uses RTC UID `100` and RTM UID `100-{channel}` in the same token,
+allowing the agent to join RTC and RTM with different identities.
 
 Token expires in 24 hours.
 
 ### Without APP_CERTIFICATE
-Returns `APP_ID` as token (testing mode only).
+Returns `APP_ID` as token for channel join (testing mode).
+Requires `AGENT_AUTH_HEADER` for API authentication.
 
 ## Lambda Configuration
 
@@ -375,8 +391,8 @@ LLM_MODEL=gpt-4o-mini
 ## Troubleshooting
 
 ### Agent doesn't join channel
-- Verify `AGENT_AUTH_HEADER` is correct
-- Check `APP_ID` and `APP_CERTIFICATE` match your Agora project
+- Verify either `APP_CERTIFICATE` or `AGENT_AUTH_HEADER` is set
+- Check `APP_ID` matches your Agora project
 - Ensure Lambda has internet access (VPC configuration)
 
 ### No audio from agent
