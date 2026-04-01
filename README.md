@@ -1,6 +1,6 @@
 # Agora RTC Lambda Functions
 
-AWS Lambda functions for Agora RTC token generation and ConvoAI agent management.
+AWS Lambda functions for Agora RTC token generation and ConvoAI agent management to be used in conjunction with the Agora telephony/SIP gateway.
 
 ## Table of Contents
 
