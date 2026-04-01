@@ -1,8 +1,109 @@
-# Launch Agent - Agora ConvoAI Lambda Function
+# Agora RTC Lambda Functions
 
-AWS Lambda function for launching Agora ConvoAI agents with configurable TTS, STT, and LLM providers.
+AWS Lambda functions for Agora RTC token generation and ConvoAI agent management.
 
-## Features
+## Table of Contents
+
+- [Overview](#overview)
+- [token_gen.py — PSTN CallLookup](#token_genpy--pstn-calllookup)
+  - [How It Works](#how-it-works)
+  - [Environment Variables (token_gen)](#environment-variables-token_gen)
+  - [Request / Response](#request--response)
+  - [Lambda Configuration (token_gen)](#lambda-configuration-token_gen)
+- [launch_agent.py — ConvoAI Agent Launcher](#launch_agentpy--convoai-agent-launcher)
+  - [Features](#features)
+  - [Supported Providers](#supported-providers)
+  - [Environment Variables (launch_agent)](#environment-variables-launch_agent)
+  - [API Usage](#api-usage)
+  - [UID Structure](#uid-structure)
+  - [Advanced Features](#advanced-features)
+  - [Profile-Based Configuration](#profile-based-configuration)
+  - [Example Configurations](#example-configurations)
+  - [Lambda Configuration (launch_agent)](#lambda-configuration-launch_agent)
+- [Token Generation](#token-generation)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Overview
+
+This repo contains two independent Lambda functions:
+
+| Lambda | File | Purpose |
+|--------|------|---------|
+| **PSTN CallLookup** | `token_gen.py` | Returns an RTC token + channel for inbound PSTN calls |
+| **ConvoAI Agent Launcher** | `launch_agent.py` | Generates tokens, launches/hangs-up Agora ConvoAI agents |
+
+Both share the same v007 token generation code but serve different use cases.
+
+---
+
+## token_gen.py — PSTN CallLookup
+
+Handles the Agora PSTN gateway [CallLookup webhook](https://github.com/AgoraIO-Solutions/pstn-doc#calllookup). When an inbound phone call arrives, the gateway POSTs caller information and this Lambda responds with an RTC token and channel name so the gateway can connect the caller.
+
+### How It Works
+
+1. PSTN gateway sends `POST {did, pin, callerid}`
+2. Lambda generates a random 10-character channel name
+3. Builds a v007 RTC token (or uses APP_ID if no certificate)
+4. Returns the CallLookup response so the gateway joins the caller to the channel
+
+### Environment Variables (token_gen)
+
+#### Required
+```bash
+APP_ID=your_agora_app_id
+```
+
+#### Optional
+```bash
+APP_CERTIFICATE=your_agora_app_certificate   # omit to use APP_ID as token
+USER_UID=101                                  # default: "101"
+AUDIO_SCENARIO=0                              # default: "0"
+WEBHOOK_URL=https://example.com/webhook       # included in response if set
+SDK_OPTIONS={"key":"value"}                   # included in response if set
+```
+
+### Request / Response
+
+**Request** (POST from PSTN gateway):
+```json
+{
+  "did": "17177440111",
+  "pin": "",
+  "callerid": "1765740333"
+}
+```
+
+**Response:**
+```json
+{
+  "token": "007eJxT...",
+  "uid": "101",
+  "channel": "A1B2C3D4E5",
+  "appid": "your_app_id",
+  "audio_scenario": "0"
+}
+```
+
+Optional fields `webhook_url` and `sdk_options` are included when the corresponding environment variables are set.
+
+### Lambda Configuration (token_gen)
+
+| Setting | Value |
+|---------|-------|
+| Handler | `token_gen.lambda_handler` |
+| Timeout | 10 seconds |
+| Memory | 128 MB |
+
+---
+
+## launch_agent.py — ConvoAI Agent Launcher
+
+Launches and manages Agora Conversational AI agents with configurable TTS, STT, and LLM providers.
+
+### Features
 
 - **Multi-vendor TTS support**: Rime, ElevenLabs, OpenAI, Cartesia
 - **Multi-vendor STT support**: Ares (Agora built-in), Deepgram
@@ -12,11 +113,11 @@ AWS Lambda function for launching Agora ConvoAI agents with configurable TTS, ST
 - **Agent lifecycle management**: Join and hangup capabilities
 - **RTM support**: Real-time messaging integration
 
-## Supported Providers
+### Supported Providers
 
-### Text-to-Speech (TTS)
+#### Text-to-Speech (TTS)
 
-#### 1. Rime
+**1. Rime**
 ```
 TTS_VENDOR=rime
 RIME_API_KEY=your_api_key
@@ -27,7 +128,7 @@ RIME_SAMPLING_RATE=16000 (default)
 RIME_SPEED_ALPHA=1.0 (default)
 ```
 
-#### 2. ElevenLabs
+**2. ElevenLabs**
 ```
 TTS_VENDOR=elevenlabs
 TTS_KEY=your_api_key
@@ -36,7 +137,7 @@ TTS_VOICE_STABILITY=1 (default: 0-1)
 TTS_VOICE_SAMPLE_RATE=24000 (default)
 ```
 
-#### 3. OpenAI
+**3. OpenAI**
 ```
 TTS_VENDOR=openai
 TTS_KEY=your_api_key
@@ -44,7 +145,7 @@ TTS_VOICE_ID=alloy|echo|fable|onyx|nova|shimmer
 TTS_VOICE_SPEED=1.0 (default: 0.25-4.0)
 ```
 
-#### 4. Cartesia
+**4. Cartesia**
 ```
 TTS_VENDOR=cartesia
 CARTESIA_API_KEY=your_api_key
@@ -53,16 +154,15 @@ CARTESIA_VOICE_ID=your_voice_id
 CARTESIA_SAMPLE_RATE=24000 (default)
 ```
 
-### Speech-to-Text (STT/ASR)
+#### Speech-to-Text (STT/ASR)
 
-#### Ares (default)
-Agora's built-in ASR - no API key required:
+**Ares (default)** — Agora's built-in ASR, no API key required:
 ```
 ASR_VENDOR=ares (default)
 ASR_LANGUAGE=en-US (default)
 ```
 
-#### Deepgram
+**Deepgram**
 ```
 ASR_VENDOR=deepgram
 DEEPGRAM_KEY=your_api_key
@@ -70,7 +170,7 @@ DEEPGRAM_MODEL=nova-3 (default)
 DEEPGRAM_LANGUAGE=en (default)
 ```
 
-### Large Language Model (LLM)
+#### Large Language Model (LLM)
 
 Any OpenAI-compatible API:
 ```
@@ -79,9 +179,9 @@ LLM_API_KEY=your_api_key
 LLM_MODEL=gpt-4o-mini
 ```
 
-## Environment Variables
+### Environment Variables (launch_agent)
 
-### Required
+#### Required
 ```bash
 APP_ID=your_agora_app_id
 LLM_URL=your_llm_endpoint
@@ -89,7 +189,7 @@ LLM_API_KEY=your_llm_api_key
 LLM_MODEL=your_model_name
 ```
 
-### Authentication (one of the following)
+#### Authentication (one of the following)
 ```bash
 # Option 1: APP_CERTIFICATE (recommended)
 # Generates v007 tokens for both API auth and channel join.
@@ -104,10 +204,10 @@ AGENT_AUTH_HEADER=Basic <base64_key:secret>
 If both are set, `AGENT_AUTH_HEADER` takes priority for API auth.
 If neither is set, API calls will fail (APP_ID alone is not valid for API auth).
 
-### TTS Configuration (choose one vendor)
+#### TTS Configuration
 See provider-specific settings above.
 
-### STT Configuration
+#### STT Configuration
 ```bash
 # Default: Ares (no API key needed)
 ASR_VENDOR=ares
@@ -119,7 +219,7 @@ DEEPGRAM_MODEL=nova-3
 DEEPGRAM_LANGUAGE=en
 ```
 
-### Optional Settings
+#### Optional Settings
 ```bash
 # Agent Behavior
 DEFAULT_PROMPT="Your custom system prompt"
@@ -143,28 +243,12 @@ IDLE_TIMEOUT=120
 GRAPH_ID=your_graph_id
 ```
 
-### Profile-Based Configuration
+### API Usage
 
-Use profile suffix to override defaults for specific use cases:
-
-```bash
-# Default configuration
-LLM_MODEL=gpt-4o-mini
-DEFAULT_GREETING="Hi there"
-
-# Profile-specific (accessed via ?profile=premium)
-LLM_MODEL_premium=gpt-4o
-DEFAULT_GREETING_premium="Welcome, premium user"
-```
-
-## API Usage
-
-### Base URL
+#### Base URL
 ```
 https://your-lambda-url.amazonaws.com/your-stage/
 ```
-
-### Endpoints
 
 #### 1. Launch Agent (Standard)
 ```bash
@@ -273,75 +357,56 @@ GET /?debug=true&channel=my_channel
 GET /?debug=true&env_debug=true  # Show environment variables
 ```
 
-## UID Structure
+### UID Structure
 
-- **User UID**: `"101"` - For end-user RTC connection
-- **Agent UID**: `"100"` - For AI agent audio
-- **Agent Video UID**: `"102"` - For agent video stream (if applicable)
+- **User UID**: `"101"` — For end-user RTC connection
+- **Agent UID**: `"100"` — For AI agent audio
+- **Agent Video UID**: `"102"` — For agent video stream (if applicable)
 - **String UIDs**: Disabled by default (`enable_string_uid: false`)
 
-## Advanced Features
+### Advanced Features
 
-### 1. RTM (Real-Time Messaging)
+#### RTM (Real-Time Messaging)
 Enable text chat alongside voice:
 ```bash
 ENABLE_RTM=true
 ```
 
-### 2. AI VAD (Voice Activity Detection)
+#### AI VAD (Voice Activity Detection)
 AI-powered voice activity detection:
 ```bash
 ENABLE_AIVAD=true
 ```
 
-### 3. Behaviors (BHVS)
+#### Behaviors (BHVS)
 Enable agent behavior extensions:
 ```bash
 ENABLE_BHVS=true
 ```
 
-### 4. Error Messages
+#### Error Messages
 Return error messages to users:
 ```bash
 ENABLE_ERROR_MESSAGE=true
 ```
 
-## Token Generation
+### Profile-Based Configuration
 
-Uses v007 service-based tokens with separate RTC and RTM services.
+Use profile suffix to override defaults for specific use cases:
 
-### With APP_CERTIFICATE
-Generates v007 tokens with independent RTC and RTM UIDs:
-- **RTC Service**: JOIN_CHANNEL, PUBLISH_AUDIO/VIDEO/DATA_STREAM privileges
-- **RTM Service**: LOGIN privilege with separate RTM UID (`{agent_uid}-{channel}`)
+```bash
+# Default configuration
+LLM_MODEL=gpt-4o-mini
+DEFAULT_GREETING="Hi there"
 
-The agent token uses RTC UID `100` and RTM UID `100-{channel}` in the same token,
-allowing the agent to join RTC and RTM with different identities.
-
-Token expires in 24 hours.
-
-### Without APP_CERTIFICATE
-Returns `APP_ID` as token for channel join (testing mode).
-Requires `AGENT_AUTH_HEADER` for API authentication.
-
-## Lambda Configuration
-
-### Handler
-```
-launch_agent.lambda_handler
+# Profile-specific (accessed via ?profile=premium)
+LLM_MODEL_premium=gpt-4o
+DEFAULT_GREETING_premium="Welcome, premium user"
 ```
 
-### Recommended Settings
-- **Timeout**: 30 seconds
-- **Memory**: 256 MB
-- **Enable CORS**: Yes (for browser clients)
+### Example Configurations
 
-### Environment Variables
-Set all required environment variables in Lambda configuration.
-
-## Example Configurations
-
-### ElevenLabs + Deepgram + OpenAI
+#### ElevenLabs + Deepgram + OpenAI
 ```bash
 TTS_VENDOR=elevenlabs
 TTS_KEY=sk_...
@@ -356,7 +421,7 @@ LLM_API_KEY=sk-...
 LLM_MODEL=gpt-4o-mini
 ```
 
-### Rime + Deepgram + Custom LLM
+#### Rime + Deepgram + Custom LLM
 ```bash
 TTS_VENDOR=rime
 RIME_API_KEY=...
@@ -371,7 +436,7 @@ LLM_API_KEY=...
 LLM_MODEL=your-custom-model
 ```
 
-### Cartesia + Deepgram + OpenAI
+#### Cartesia + Deepgram + OpenAI
 ```bash
 TTS_VENDOR=cartesia
 CARTESIA_API_KEY=...
@@ -388,25 +453,63 @@ LLM_API_KEY=sk-...
 LLM_MODEL=gpt-4o-mini
 ```
 
+### Lambda Configuration (launch_agent)
+
+| Setting | Value |
+|---------|-------|
+| Handler | `launch_agent.lambda_handler` |
+| Timeout | 30 seconds |
+| Memory | 256 MB |
+| CORS | Enable for browser clients |
+
+---
+
+## Token Generation
+
+Both Lambdas use v007 service-based tokens.
+
+### With APP_CERTIFICATE
+
+Generates v007 tokens with RTC privileges:
+- **RTC Service**: JOIN_CHANNEL, PUBLISH_AUDIO/VIDEO/DATA_STREAM privileges
+- **RTM Service** (launch_agent only): LOGIN privilege with separate RTM UID (`{agent_uid}-{channel}`)
+
+`token_gen.py` generates RTC-only tokens (PSTN callers don't use RTM).
+`launch_agent.py` generates tokens with both RTC and RTM services.
+
+Token expires in 24 hours.
+
+### Without APP_CERTIFICATE
+
+Returns `APP_ID` as token for channel join (testing mode).
+For `launch_agent.py`, this requires `AGENT_AUTH_HEADER` for API authentication.
+
+---
+
 ## Troubleshooting
 
-### Agent doesn't join channel
+### Agent doesn't join channel (launch_agent)
 - Verify either `APP_CERTIFICATE` or `AGENT_AUTH_HEADER` is set
 - Check `APP_ID` matches your Agora project
 - Ensure Lambda has internet access (VPC configuration)
 
-### No audio from agent
+### No audio from agent (launch_agent)
 - Verify TTS provider credentials
 - Check TTS_VENDOR matches your configuration
 - Review CloudWatch logs for TTS errors
 
-### Speech recognition not working
+### Speech recognition not working (launch_agent)
 - Verify Deepgram API key
 - Check microphone permissions on client side
 - Ensure audio is being sent to channel
 
+### PSTN caller not connecting (token_gen)
+- Verify the PSTN gateway is configured to POST to your Lambda URL
+- Check `APP_ID` is correct
+- Review CloudWatch logs for the CallLookup request
+
 ### Token errors
-- Verify `APP_CERTIFICATE` is correct
+- Verify `APP_CERTIFICATE` is correct (must be 32-character hex)
 - Check token hasn't expired (24h default)
 - Ensure UID matches between client and token
 
