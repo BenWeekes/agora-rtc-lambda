@@ -243,10 +243,13 @@ def lambda_handler(event, context):
     
     if has_certificate:
         # Get token for user with RTC and RTM capabilities
-        user_token_data = build_token_with_rtm(channel, constants["USER_UID"], constants)
-        
+        # RTM uid must match client format: "uid-channel" (e.g. "101-test2")
+        user_rtm_uid = f"{constants['USER_UID']}-{channel}"
+        user_token_data = build_token_with_rtm(channel, constants["USER_UID"], constants, rtm_uid=user_rtm_uid)
+
         # Get token for agent video with RTC and RTM capabilities
-        agent_video_token_data = build_token_with_rtm(channel, constants["AGENT_VIDEO_UID"], constants)
+        agent_video_rtm_uid = f"{constants['AGENT_VIDEO_UID']}-{channel}"
+        agent_video_token_data = build_token_with_rtm(channel, constants["AGENT_VIDEO_UID"], constants, rtm_uid=agent_video_rtm_uid)
     else:
         # No certificate - use APP_ID as token (testing mode)
         user_token_data = {
