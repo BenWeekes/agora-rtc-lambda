@@ -621,12 +621,16 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
             raise ValueError("TTS_KEY is required when TTS_VENDOR=openai")
         if not voice_id:
             raise ValueError("TTS_VOICE_ID is required when TTS_VENDOR=openai")
+        tts_config["skip_patterns"] = [5]
         tts_config["params"] = {
-            "model": "tts-1",
+            "api_key": constants["TTS_KEY"],
+            "model": constants.get("TTS_MODEL") or "tts-1",
             "voice": voice_id,
             "response_format": "pcm",
             "speed": float(voice_speed)
         }
+        if voice_instructions:
+            tts_config["params"]["instructions"] = voice_instructions
     elif tts_vendor == "cartesia":
         if not constants.get("CARTESIA_API_KEY"):
             raise ValueError("CARTESIA_API_KEY is required when TTS_VENDOR=cartesia")
