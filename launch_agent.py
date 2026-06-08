@@ -127,18 +127,18 @@ def initialize_constants(profile=None):
 
     # Continue with remaining constants
     constants.update({
-        # Define ASR settings
+        # Define ASR settings (ASR_KEY mirrors TTS_KEY pattern)
         "ASR_LANGUAGE": get_env_var('ASR_LANGUAGE', profile, "en-US"),
         "ASR_VENDOR": get_env_var('ASR_VENDOR', profile, "ares"),
-        "DEEPGRAM_URL": get_env_var('DEEPGRAM_URL', profile, "wss://api.deepgram.com/v1/listen"),
-        "DEEPGRAM_KEY": get_env_var('DEEPGRAM_KEY', profile),
-        "DEEPGRAM_MODEL": get_env_var('DEEPGRAM_MODEL', profile, "nova-3"),
+        "ASR_KEY": get_env_var('ASR_KEY', profile) or get_env_var('DEEPGRAM_KEY', profile),
+        "ASR_MODEL": get_env_var('ASR_MODEL', profile) or get_env_var('DEEPGRAM_MODEL', profile, "nova-3"),
+        "ASR_URL": get_env_var('ASR_URL', profile) or get_env_var('DEEPGRAM_URL', profile, "wss://api.deepgram.com/v1/listen"),
+        "ASR_SAMPLE_RATE": get_env_var('ASR_SAMPLE_RATE', profile) or get_env_var('DEEPGRAM_SAMPLE_RATE', profile),
+        "ASR_ENCODING": get_env_var('ASR_ENCODING', profile) or get_env_var('DEEPGRAM_ENCODING', profile),
+        "ASR_EAGER_EOT_THRESHOLD": get_env_var('ASR_EAGER_EOT_THRESHOLD', profile) or get_env_var('DEEPGRAM_EAGER_EOT_THRESHOLD', profile),
+        "ASR_EOT_THRESHOLD": get_env_var('ASR_EOT_THRESHOLD', profile) or get_env_var('DEEPGRAM_EOT_THRESHOLD', profile),
+        "ASR_EOT_TIMEOUT_MS": get_env_var('ASR_EOT_TIMEOUT_MS', profile) or get_env_var('DEEPGRAM_EOT_TIMEOUT_MS', profile),
         "DEEPGRAM_LANGUAGE": get_env_var('DEEPGRAM_LANGUAGE', profile, "en"),
-        "DEEPGRAM_SAMPLE_RATE": get_env_var('DEEPGRAM_SAMPLE_RATE', profile),
-        "DEEPGRAM_ENCODING": get_env_var('DEEPGRAM_ENCODING', profile),
-        "DEEPGRAM_EAGER_EOT_THRESHOLD": get_env_var('DEEPGRAM_EAGER_EOT_THRESHOLD', profile),
-        "DEEPGRAM_EOT_THRESHOLD": get_env_var('DEEPGRAM_EOT_THRESHOLD', profile),
-        "DEEPGRAM_EOT_TIMEOUT_MS": get_env_var('DEEPGRAM_EOT_TIMEOUT_MS', profile),
         
         # VAD settings
         "VAD_SILENCE_DURATION_MS": get_env_var('VAD_SILENCE_DURATION_MS', profile, "300"),
@@ -325,11 +325,11 @@ def lambda_handler(event, context):
     llm_api_key = query_params.get('llm_api_key', constants["LLM_API_KEY"])
     llm_model = query_params.get('llm_model', constants["LLM_MODEL"])
     
-    # Get ASR parameters
+    # Get ASR parameters (ASR_KEY/ASR_MODEL mirror TTS_KEY/TTS_MODEL pattern)
     asr_vendor = query_params.get('asr_vendor', constants["ASR_VENDOR"])
-    deepgram_url = query_params.get('deepgram_url', constants["DEEPGRAM_URL"])
-    deepgram_key = query_params.get('deepgram_key', constants["DEEPGRAM_KEY"])
-    deepgram_model = query_params.get('deepgram_model', constants["DEEPGRAM_MODEL"])
+    deepgram_url = query_params.get('asr_url', constants["ASR_URL"])
+    deepgram_key = query_params.get('asr_key', constants["ASR_KEY"])
+    deepgram_model = query_params.get('asr_model', constants["ASR_MODEL"])
     deepgram_language = query_params.get('deepgram_language', constants["DEEPGRAM_LANGUAGE"])
     
     # Get VAD parameters
@@ -669,24 +669,24 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         asr_config["language"] = constants["ASR_LANGUAGE"]
     elif asr_vendor == "deepgram":
         if not deepgram_key:
-            raise ValueError("DEEPGRAM_KEY is required when ASR_VENDOR=deepgram")
+            raise ValueError("ASR_KEY is required when ASR_VENDOR=deepgram")
         asr_config["params"] = {
             "url": deepgram_url,
             "key": deepgram_key,
             "model": deepgram_model,
             "language": deepgram_language
         }
-        # Add optional Deepgram flux params if configured
-        if constants.get("DEEPGRAM_SAMPLE_RATE"):
-            asr_config["params"]["sample_rate"] = int(constants["DEEPGRAM_SAMPLE_RATE"])
-        if constants.get("DEEPGRAM_ENCODING"):
-            asr_config["params"]["encoding"] = constants["DEEPGRAM_ENCODING"]
-        if constants.get("DEEPGRAM_EAGER_EOT_THRESHOLD"):
-            asr_config["params"]["eager_eot_threshold"] = float(constants["DEEPGRAM_EAGER_EOT_THRESHOLD"])
-        if constants.get("DEEPGRAM_EOT_THRESHOLD"):
-            asr_config["params"]["eot_threshold"] = float(constants["DEEPGRAM_EOT_THRESHOLD"])
-        if constants.get("DEEPGRAM_EOT_TIMEOUT_MS"):
-            asr_config["params"]["eot_timeout_ms"] = int(constants["DEEPGRAM_EOT_TIMEOUT_MS"])
+        # Add optional params if configured
+        if constants.get("ASR_SAMPLE_RATE"):
+            asr_config["params"]["sample_rate"] = int(constants["ASR_SAMPLE_RATE"])
+        if constants.get("ASR_ENCODING"):
+            asr_config["params"]["encoding"] = constants["ASR_ENCODING"]
+        if constants.get("ASR_EAGER_EOT_THRESHOLD"):
+            asr_config["params"]["eager_eot_threshold"] = float(constants["ASR_EAGER_EOT_THRESHOLD"])
+        if constants.get("ASR_EOT_THRESHOLD"):
+            asr_config["params"]["eot_threshold"] = float(constants["ASR_EOT_THRESHOLD"])
+        if constants.get("ASR_EOT_TIMEOUT_MS"):
+            asr_config["params"]["eot_timeout_ms"] = int(constants["ASR_EOT_TIMEOUT_MS"])
     else:
         # Default fallback - just set language
         asr_config["language"] = constants["ASR_LANGUAGE"]
