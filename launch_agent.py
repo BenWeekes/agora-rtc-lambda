@@ -131,8 +131,8 @@ def initialize_constants(profile=None):
         "ASR_LANGUAGE": get_env_var('ASR_LANGUAGE', profile, "en-US"),
         "ASR_VENDOR": get_env_var('ASR_VENDOR', profile, "ares"),
         "ASR_KEY": get_env_var('ASR_KEY', profile) or get_env_var('DEEPGRAM_KEY', profile),
-        "ASR_MODEL": get_env_var('ASR_MODEL', profile) or get_env_var('DEEPGRAM_MODEL', profile, "nova-3"),
-        "ASR_URL": get_env_var('ASR_URL', profile) or get_env_var('DEEPGRAM_URL', profile, "wss://api.deepgram.com/v1/listen"),
+        "ASR_MODEL": get_env_var('ASR_MODEL', profile) or get_env_var('DEEPGRAM_MODEL', profile, "flux-general-en"),
+        "ASR_URL": get_env_var('ASR_URL', profile) or get_env_var('DEEPGRAM_URL', profile, "wss://api.deepgram.com/v2/listen"),
         "ASR_SAMPLE_RATE": get_env_var('ASR_SAMPLE_RATE', profile) or get_env_var('DEEPGRAM_SAMPLE_RATE', profile),
         "ASR_ENCODING": get_env_var('ASR_ENCODING', profile) or get_env_var('DEEPGRAM_ENCODING', profile),
         "ASR_EAGER_EOT_THRESHOLD": get_env_var('ASR_EAGER_EOT_THRESHOLD', profile) or get_env_var('DEEPGRAM_EAGER_EOT_THRESHOLD', profile),
@@ -674,19 +674,16 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
             "url": deepgram_url,
             "key": deepgram_key,
             "model": deepgram_model,
-            "language": deepgram_language
+            "sample_rate": int(constants.get("ASR_SAMPLE_RATE") or 16000),
+            "encoding": constants.get("ASR_ENCODING") or "linear16"
         }
-        # Add optional params if configured
-        if constants.get("ASR_SAMPLE_RATE"):
-            asr_config["params"]["sample_rate"] = int(constants["ASR_SAMPLE_RATE"])
-        if constants.get("ASR_ENCODING"):
-            asr_config["params"]["encoding"] = constants["ASR_ENCODING"]
-        if constants.get("ASR_EAGER_EOT_THRESHOLD"):
-            asr_config["params"]["eager_eot_threshold"] = float(constants["ASR_EAGER_EOT_THRESHOLD"])
-        if constants.get("ASR_EOT_THRESHOLD"):
-            asr_config["params"]["eot_threshold"] = float(constants["ASR_EOT_THRESHOLD"])
-        if constants.get("ASR_EOT_TIMEOUT_MS"):
-            asr_config["params"]["eot_timeout_ms"] = int(constants["ASR_EOT_TIMEOUT_MS"])
+        # Add language if set
+        if deepgram_language:
+            asr_config["params"]["language"] = deepgram_language
+        # Add EOT params - use env var or defaults for flux models
+        asr_config["params"]["eager_eot_threshold"] = float(constants.get("ASR_EAGER_EOT_THRESHOLD") or 0.6)
+        asr_config["params"]["eot_threshold"] = float(constants.get("ASR_EOT_THRESHOLD") or 0.8)
+        asr_config["params"]["eot_timeout_ms"] = int(constants.get("ASR_EOT_TIMEOUT_MS") or 700)
     else:
         # Default fallback - just set language
         asr_config["language"] = constants["ASR_LANGUAGE"]
