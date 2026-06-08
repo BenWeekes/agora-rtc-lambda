@@ -721,14 +721,18 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         ("advanced_features", {
             "enable_bhvs": enable_bhvs,
             "enable_rtm": enable_rtm,
-            "enable_aivad": enable_aivad,
             "enable_sal": True
         }),
         ("enable_string_uid", False),
         ("idle_timeout", int(idle_timeout)),
         ("llm", llm_config),
-        ("vad", {
-            "silence_duration_ms": int(vad_silence_duration)
+        ("turn_detection", {
+            "config": {
+                "end_of_speech": {
+                    "mode": "semantic" if enable_aivad else "vad",
+                    "silence_duration_ms": int(vad_silence_duration)
+                }
+            }
         }),
         ("asr", asr_config),
         ("tts", tts_config)
