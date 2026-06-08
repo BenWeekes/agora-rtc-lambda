@@ -613,6 +613,7 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         if not voice_id:
             raise ValueError("TTS_VOICE_ID is required when TTS_VENDOR=elevenlabs")
         tts_config["params"] = {
+            "key": constants["TTS_KEY"],
             "voice_id": voice_id,
             "model_id": constants["ELEVENLABS_MODEL"],
             "optimize_streaming_latency": 3,
