@@ -627,9 +627,10 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         tts_config["skip_patterns"] = [5]
         tts_config["params"] = {
             "api_key": constants["TTS_KEY"],
-            "model": constants.get("TTS_MODEL") or "tts-1",
+            "model": constants.get("TTS_MODEL") or "gpt-4o-mini-tts",
             "voice": voice_id,
             "response_format": "pcm",
+            "sample_rate": int(voice_sample_rate),
             "speed": float(voice_speed)
         }
         if voice_instructions:
