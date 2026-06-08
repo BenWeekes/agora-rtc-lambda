@@ -134,6 +134,11 @@ def initialize_constants(profile=None):
         "DEEPGRAM_KEY": get_env_var('DEEPGRAM_KEY', profile),
         "DEEPGRAM_MODEL": get_env_var('DEEPGRAM_MODEL', profile, "nova-3"),
         "DEEPGRAM_LANGUAGE": get_env_var('DEEPGRAM_LANGUAGE', profile, "en"),
+        "DEEPGRAM_SAMPLE_RATE": get_env_var('DEEPGRAM_SAMPLE_RATE', profile),
+        "DEEPGRAM_ENCODING": get_env_var('DEEPGRAM_ENCODING', profile),
+        "DEEPGRAM_EAGER_EOT_THRESHOLD": get_env_var('DEEPGRAM_EAGER_EOT_THRESHOLD', profile),
+        "DEEPGRAM_EOT_THRESHOLD": get_env_var('DEEPGRAM_EOT_THRESHOLD', profile),
+        "DEEPGRAM_EOT_TIMEOUT_MS": get_env_var('DEEPGRAM_EOT_TIMEOUT_MS', profile),
         
         # VAD settings
         "VAD_SILENCE_DURATION_MS": get_env_var('VAD_SILENCE_DURATION_MS', profile, "300"),
@@ -671,6 +676,17 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
             "model": deepgram_model,
             "language": deepgram_language
         }
+        # Add optional Deepgram flux params if configured
+        if constants.get("DEEPGRAM_SAMPLE_RATE"):
+            asr_config["params"]["sample_rate"] = int(constants["DEEPGRAM_SAMPLE_RATE"])
+        if constants.get("DEEPGRAM_ENCODING"):
+            asr_config["params"]["encoding"] = constants["DEEPGRAM_ENCODING"]
+        if constants.get("DEEPGRAM_EAGER_EOT_THRESHOLD"):
+            asr_config["params"]["eager_eot_threshold"] = float(constants["DEEPGRAM_EAGER_EOT_THRESHOLD"])
+        if constants.get("DEEPGRAM_EOT_THRESHOLD"):
+            asr_config["params"]["eot_threshold"] = float(constants["DEEPGRAM_EOT_THRESHOLD"])
+        if constants.get("DEEPGRAM_EOT_TIMEOUT_MS"):
+            asr_config["params"]["eot_timeout_ms"] = int(constants["DEEPGRAM_EOT_TIMEOUT_MS"])
     else:
         # Default fallback - just set language
         asr_config["language"] = constants["ASR_LANGUAGE"]
