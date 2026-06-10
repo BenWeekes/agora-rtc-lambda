@@ -160,7 +160,13 @@ def initialize_constants(profile=None):
             "going by learning more about the user. "),
         "DEFAULT_GREETING": get_env_var('DEFAULT_GREETING', profile, "hi there"),
         "DEFAULT_FAILURE_MESSAGE": get_env_var('DEFAULT_FAILURE_MESSAGE', profile, "An error occurred, please try again later"),
-        "DEFAULT_MAX_HISTORY": get_env_var('DEFAULT_MAX_HISTORY', profile, "32")
+        "DEFAULT_MAX_HISTORY": get_env_var('DEFAULT_MAX_HISTORY', profile, "32"),
+
+        # MLLM (Multimodal LLM) settings - for Gemini Live native audio
+        "ENABLE_MLLM": get_env_var('ENABLE_MLLM', profile, "false"),
+        "MLLM_API_KEY": get_env_var('MLLM_API_KEY', profile),
+        "MLLM_MODEL": get_env_var('MLLM_MODEL', profile, "gemini-3.1-flash-live-preview"),
+        "MLLM_VOICE": get_env_var('MLLM_VOICE', profile, "Aoede"),
     })
 
     return constants
@@ -300,50 +306,13 @@ def lambda_handler(event, context):
     failure_message = query_params.get('failure_message', constants["DEFAULT_FAILURE_MESSAGE"])
     max_history = query_params.get('max_history', constants["DEFAULT_MAX_HISTORY"])
     
-    # Get TTS vendor from query params or use default
-    tts_vendor = query_params.get('tts_vendor', constants["TTS_VENDOR"])
-    
-    # Get voice parameters based on TTS vendor
-    if tts_vendor == "rime":
-        # Rime TTS parameters
-        rime_api_key = query_params.get('rime_api_key', constants["RIME_API_KEY"])
-        rime_speaker = query_params.get('rime_speaker', constants["RIME_SPEAKER"])
-        rime_model_id = query_params.get('rime_model_id', constants["RIME_MODEL_ID"])
-        rime_lang = query_params.get('rime_lang', constants["RIME_LANG"])
-        rime_sampling_rate = query_params.get('rime_sampling_rate', constants["RIME_SAMPLING_RATE"])
-        rime_speed_alpha = query_params.get('rime_speed_alpha', constants["RIME_SPEED_ALPHA"])
-    else:
-        # Other TTS parameters (existing support)
-        voice_id = query_params.get('voice_id', constants["TTS_VOICE_ID"])
-        voice_stability = query_params.get('voice_stability', constants["TTS_VOICE_STABILITY"])
-        voice_speed = query_params.get('voice_speed', constants["TTS_VOICE_SPEED"])
-        voice_sample_rate = query_params.get('voice_sample_rate', constants["TTS_VOICE_SAMPLE_RATE"])
-        voice_instructions = query_params.get('voice_instructions', constants["TTS_VOICE_INSTRUCTIONS"])
-    
-    # Get LLM parameters
-    llm_url = query_params.get('llm_url', constants["LLM_URL"])
-    llm_api_key = query_params.get('llm_api_key', constants["LLM_API_KEY"])
-    llm_model = query_params.get('llm_model', constants["LLM_MODEL"])
-    
-    # Get ASR parameters (ASR_KEY/ASR_MODEL mirror TTS_KEY/TTS_MODEL pattern)
-    asr_vendor = query_params.get('asr_vendor', constants["ASR_VENDOR"])
-    deepgram_url = query_params.get('asr_url', constants["ASR_URL"])
-    deepgram_key = query_params.get('asr_key', constants["ASR_KEY"])
-    deepgram_model = query_params.get('asr_model', constants["ASR_MODEL"])
-    deepgram_language = query_params.get('deepgram_language', constants["DEEPGRAM_LANGUAGE"])
-    
-    # Get VAD parameters
-    vad_silence_duration = query_params.get('vad_silence_duration_ms', constants["VAD_SILENCE_DURATION_MS"])
-    
-    # Get advanced features
-    enable_bhvs = query_params.get('enable_bhvs', constants["ENABLE_BHVS"]).lower() == "true"
-    enable_rtm = query_params.get('enable_rtm', constants["ENABLE_RTM"]).lower() == "true"
-    enable_aivad = query_params.get('enable_aivad', constants["ENABLE_AIVAD"]).lower() == "true"
-    
-    # Get agent settings
+    # Check if MLLM mode is enabled (Gemini Live native audio)
+    enable_mllm = query_params.get('enable_mllm', constants["ENABLE_MLLM"]).lower() == "true"
+
+    # Get agent settings (shared by both modes)
     idle_timeout = query_params.get('idle_timeout', constants["IDLE_TIMEOUT"])
     enable_error_message = query_params.get('enable_error_message', constants["ENABLE_ERROR_MESSAGE"]).lower() == "true"
-    
+
     # Generate agent token with split RTC/RTM UIDs
     agent_rtm_uid = f"{constants['AGENT_UID']}-{channel}"
     if has_certificate:
@@ -354,45 +323,123 @@ def lambda_handler(event, context):
     else:
         agent_token = constants["APP_ID"]
 
+    # Get ASR parameters (used by both modes)
+    asr_vendor = query_params.get('asr_vendor', constants["ASR_VENDOR"])
+
+    # Build ASR config (shared by both modes)
+    asr_config = {"vendor": asr_vendor}
+    if asr_vendor == "ares":
+        asr_config["language"] = constants["ASR_LANGUAGE"]
+    elif asr_vendor == "deepgram":
+        deepgram_url = query_params.get('asr_url', constants["ASR_URL"])
+        deepgram_key = query_params.get('asr_key', constants["ASR_KEY"])
+        deepgram_model = query_params.get('asr_model', constants["ASR_MODEL"])
+        deepgram_language = query_params.get('deepgram_language', constants["DEEPGRAM_LANGUAGE"])
+        if not deepgram_key:
+            return json_response(400, {"error": "ASR_KEY is required when ASR_VENDOR=deepgram"})
+        asr_config["params"] = {
+            "url": deepgram_url,
+            "key": deepgram_key,
+            "model": deepgram_model,
+            "sample_rate": int(constants.get("ASR_SAMPLE_RATE") or 16000),
+            "encoding": constants.get("ASR_ENCODING") or "linear16"
+        }
+        if deepgram_language:
+            asr_config["params"]["language"] = deepgram_language
+        asr_config["params"]["eager_eot_threshold"] = float(constants.get("ASR_EAGER_EOT_THRESHOLD") or 0.6)
+        asr_config["params"]["eot_threshold"] = float(constants.get("ASR_EOT_THRESHOLD") or 0.8)
+        asr_config["params"]["eot_timeout_ms"] = int(constants.get("ASR_EOT_TIMEOUT_MS") or 700)
+    else:
+        asr_config["language"] = constants["ASR_LANGUAGE"]
+
     # Create the agent payload with error handling
     try:
-        agent_payload = create_agent_payload(
-            channel=channel,
-            agent_token=agent_token,
-            prompt=prompt,
-            greeting=greeting,
-            failure_message=failure_message,
-            max_history=max_history,
-            tts_vendor=tts_vendor,
-            llm_url=llm_url,
-            llm_api_key=llm_api_key,
-            llm_model=llm_model,
-            asr_vendor=asr_vendor,
-            deepgram_url=deepgram_url,
-            deepgram_key=deepgram_key,
-            deepgram_model=deepgram_model,
-            deepgram_language=deepgram_language,
-            vad_silence_duration=vad_silence_duration,
-            enable_bhvs=enable_bhvs,
-            enable_rtm=enable_rtm,
-            enable_aivad=enable_aivad,
-            idle_timeout=idle_timeout,
-            enable_error_message=enable_error_message,
-            constants=constants,
-            # Rime TTS parameters
-            rime_api_key=rime_api_key if tts_vendor == "rime" else None,
-            rime_speaker=rime_speaker if tts_vendor == "rime" else None,
-            rime_model_id=rime_model_id if tts_vendor == "rime" else None,
-            rime_lang=rime_lang if tts_vendor == "rime" else None,
-            rime_sampling_rate=rime_sampling_rate if tts_vendor == "rime" else None,
-            rime_speed_alpha=rime_speed_alpha if tts_vendor == "rime" else None,
-            # Other TTS parameters
-            voice_id=voice_id if tts_vendor != "rime" else None,
-            voice_stability=voice_stability if tts_vendor != "rime" else None,
-            voice_speed=voice_speed if tts_vendor != "rime" else None,
-            voice_sample_rate=voice_sample_rate if tts_vendor != "rime" else None,
-            voice_instructions=voice_instructions if tts_vendor != "rime" else None
-        )
+        if enable_mllm:
+            # MLLM mode: skip TTS/LLM, use mllm block instead
+            agent_payload = create_mllm_payload(
+                channel=channel,
+                agent_token=agent_token,
+                prompt=prompt,
+                greeting=greeting,
+                failure_message=failure_message,
+                max_history=max_history,
+                asr_vendor=asr_vendor,
+                asr_config=asr_config,
+                idle_timeout=idle_timeout,
+                enable_error_message=enable_error_message,
+                constants=constants,
+                query_params=query_params
+            )
+        else:
+            # Standard mode: separate LLM + TTS
+            # Get TTS vendor from query params or use default
+            tts_vendor = query_params.get('tts_vendor', constants["TTS_VENDOR"])
+
+            # Get voice parameters based on TTS vendor
+            if tts_vendor == "rime":
+                rime_api_key = query_params.get('rime_api_key', constants["RIME_API_KEY"])
+                rime_speaker = query_params.get('rime_speaker', constants["RIME_SPEAKER"])
+                rime_model_id = query_params.get('rime_model_id', constants["RIME_MODEL_ID"])
+                rime_lang = query_params.get('rime_lang', constants["RIME_LANG"])
+                rime_sampling_rate = query_params.get('rime_sampling_rate', constants["RIME_SAMPLING_RATE"])
+                rime_speed_alpha = query_params.get('rime_speed_alpha', constants["RIME_SPEED_ALPHA"])
+            else:
+                voice_id = query_params.get('voice_id', constants["TTS_VOICE_ID"])
+                voice_stability = query_params.get('voice_stability', constants["TTS_VOICE_STABILITY"])
+                voice_speed = query_params.get('voice_speed', constants["TTS_VOICE_SPEED"])
+                voice_sample_rate = query_params.get('voice_sample_rate', constants["TTS_VOICE_SAMPLE_RATE"])
+                voice_instructions = query_params.get('voice_instructions', constants["TTS_VOICE_INSTRUCTIONS"])
+
+            # Get LLM parameters
+            llm_url = query_params.get('llm_url', constants["LLM_URL"])
+            llm_api_key = query_params.get('llm_api_key', constants["LLM_API_KEY"])
+            llm_model = query_params.get('llm_model', constants["LLM_MODEL"])
+
+            # Get VAD parameters
+            vad_silence_duration = query_params.get('vad_silence_duration_ms', constants["VAD_SILENCE_DURATION_MS"])
+
+            # Get advanced features
+            enable_bhvs = query_params.get('enable_bhvs', constants["ENABLE_BHVS"]).lower() == "true"
+            enable_rtm = query_params.get('enable_rtm', constants["ENABLE_RTM"]).lower() == "true"
+            enable_aivad = query_params.get('enable_aivad', constants["ENABLE_AIVAD"]).lower() == "true"
+
+            agent_payload = create_agent_payload(
+                channel=channel,
+                agent_token=agent_token,
+                prompt=prompt,
+                greeting=greeting,
+                failure_message=failure_message,
+                max_history=max_history,
+                tts_vendor=tts_vendor,
+                llm_url=llm_url,
+                llm_api_key=llm_api_key,
+                llm_model=llm_model,
+                asr_vendor=asr_vendor,
+                deepgram_url=query_params.get('asr_url', constants["ASR_URL"]) if asr_vendor == "deepgram" else None,
+                deepgram_key=query_params.get('asr_key', constants["ASR_KEY"]) if asr_vendor == "deepgram" else None,
+                deepgram_model=query_params.get('asr_model', constants["ASR_MODEL"]) if asr_vendor == "deepgram" else None,
+                deepgram_language=query_params.get('deepgram_language', constants["DEEPGRAM_LANGUAGE"]) if asr_vendor == "deepgram" else None,
+                vad_silence_duration=vad_silence_duration,
+                enable_bhvs=enable_bhvs,
+                enable_rtm=enable_rtm,
+                enable_aivad=enable_aivad,
+                idle_timeout=idle_timeout,
+                enable_error_message=enable_error_message,
+                constants=constants,
+                # Rime TTS parameters
+                rime_api_key=rime_api_key if tts_vendor == "rime" else None,
+                rime_speaker=rime_speaker if tts_vendor == "rime" else None,
+                rime_model_id=rime_model_id if tts_vendor == "rime" else None,
+                rime_lang=rime_lang if tts_vendor == "rime" else None,
+                rime_sampling_rate=rime_sampling_rate if tts_vendor == "rime" else None,
+                rime_speed_alpha=rime_speed_alpha if tts_vendor == "rime" else None,
+                # Other TTS parameters
+                voice_id=voice_id if tts_vendor != "rime" else None,
+                voice_stability=voice_stability if tts_vendor != "rime" else None,
+                voice_speed=voice_speed if tts_vendor != "rime" else None,
+                voice_sample_rate=voice_sample_rate if tts_vendor != "rime" else None,
+                voice_instructions=voice_instructions if tts_vendor != "rime" else None
+            )
     except ValueError as e:
         return json_response(400, {"error": str(e)})
     
@@ -405,6 +452,7 @@ def lambda_handler(event, context):
         debug_info = {
             "agent_payload": agent_payload,
             "channel": channel,
+            "mode": "mllm" if enable_mllm else "standard",
             "token_used": "APP_ID (not RTC token)",
             "api_url": f"{constants['AGENT_API_BASE_URL']}/{constants['APP_ID']}/join",
             "user_tokens_method": "RTC tokens with privileges" if has_certificate else "APP_ID only (no certificate)",
@@ -538,6 +586,102 @@ def build_token_with_rtm(channel, uid, constants, rtm_uid=None):
     token.add_service(rtm_service)
 
     return {"token": token.build(), "uid": uid}
+
+
+def create_mllm_payload(channel, agent_token, prompt, greeting, failure_message, max_history,
+                        asr_vendor, asr_config,
+                        idle_timeout, enable_error_message, constants,
+                        query_params=None):
+    """
+    Creates the agent payload for MLLM (Multimodal LLM) mode.
+
+    In MLLM mode, a single mllm block replaces the separate llm and tts blocks.
+    The model handles both understanding and speech generation directly (e.g. Gemini Live).
+
+    Args:
+        channel: The channel name
+        agent_token: The agent's token
+        prompt: The system prompt
+        greeting: The greeting message
+        failure_message: The failure message
+        max_history: Maximum conversation history
+        asr_vendor: ASR vendor
+        asr_config: Pre-built ASR configuration dict
+        idle_timeout: Idle timeout in seconds
+        enable_error_message: Enable error messages
+        constants: Dictionary of constants
+        query_params: Optional query parameters for overrides
+
+    Returns:
+        OrderedDict containing the MLLM agent payload
+    """
+    query_params = query_params or {}
+
+    # Get MLLM parameters from query params or constants
+    mllm_api_key = query_params.get('mllm_api_key', constants["MLLM_API_KEY"])
+    mllm_model = query_params.get('mllm_model', constants["MLLM_MODEL"])
+    mllm_voice = query_params.get('mllm_voice', constants["MLLM_VOICE"])
+
+    # Build the mllm block matching the working curl structure
+    mllm_config = {
+        "enable": True,
+        "predefined_tools": ["_publish_message"],
+        "vendor": "gemini",
+        "url": "",
+        "api_key": mllm_api_key,
+        "messages": [
+            {
+                "role": "system",
+                "content": prompt
+            }
+        ],
+        "params": {
+            "model": mllm_model,
+            "voice": mllm_voice,
+            "instructions": prompt
+        },
+        "output_modalities": ["audio", "text"],
+        "max_history": int(max_history),
+        "greeting_message": greeting,
+        "failure_message": failure_message,
+        "turn_detection": {
+            "mode": "server_vad",
+            "server_vad_config": {
+                "prefix_padding_ms": 333,
+                "silence_duration_ms": 200,
+                "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",
+                "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH"
+            }
+        }
+    }
+
+    # Build properties
+    properties = OrderedDict([
+        ("channel", channel),
+        ("token", agent_token),
+        ("agent_rtc_uid", constants["AGENT_UID"]),
+        ("agent_rtm_uid", constants["AGENT_UID"] + "-" + channel),
+        ("remote_rtc_uids", ["*"]),
+        ("advanced_features", {
+            "enable_rtm": True,
+            "enable_mllm": True,
+            "enable_tools": False
+        }),
+        ("enable_string_uid", False),
+        ("idle_timeout", int(idle_timeout)),
+        ("mllm", mllm_config),
+        ("asr", asr_config),
+        ("parameters", {
+            "enable_dump": True
+        })
+    ])
+
+    payload = OrderedDict([
+        ("name", channel),
+        ("properties", properties)
+    ])
+
+    return payload
 
 
 def create_agent_payload(channel, agent_token, prompt, greeting, failure_message, max_history,
