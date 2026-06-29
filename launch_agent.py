@@ -162,11 +162,15 @@ def initialize_constants(profile=None):
         "DEFAULT_FAILURE_MESSAGE": get_env_var('DEFAULT_FAILURE_MESSAGE', profile, "An error occurred, please try again later"),
         "DEFAULT_MAX_HISTORY": get_env_var('DEFAULT_MAX_HISTORY', profile, "32"),
 
-        # MLLM (Multimodal LLM) settings - for Gemini Live native audio
+        # MLLM (Multimodal LLM) settings
         "ENABLE_MLLM": get_env_var('ENABLE_MLLM', profile, "false"),
+        "MLLM_VENDOR": get_env_var('MLLM_VENDOR', profile, "gemini"),
         "MLLM_API_KEY": get_env_var('MLLM_API_KEY', profile),
+        "MLLM_URL": get_env_var('MLLM_URL', profile, ""),
         "MLLM_MODEL": get_env_var('MLLM_MODEL', profile, "gemini-3.1-flash-live-preview"),
-        "MLLM_VOICE": get_env_var('MLLM_VOICE', profile, "Aoede"),
+        "MLLM_VOICE": get_env_var('MLLM_VOICE', profile),
+        "MLLM_LANGUAGE": get_env_var('MLLM_LANGUAGE', profile),
+        "MLLM_SAMPLE_RATE": get_env_var('MLLM_SAMPLE_RATE', profile, "24000"),
     })
 
     return constants
@@ -618,33 +622,39 @@ def create_mllm_payload(channel, agent_token, prompt, greeting, failure_message,
     query_params = query_params or {}
 
     # Get MLLM parameters from query params or constants
+    mllm_vendor = query_params.get('mllm_vendor', constants.get("MLLM_VENDOR", "gemini"))
     mllm_api_key = query_params.get('mllm_api_key', constants["MLLM_API_KEY"])
+    mllm_url = query_params.get('mllm_url', constants.get("MLLM_URL", ""))
     mllm_model = query_params.get('mllm_model', constants["MLLM_MODEL"])
     mllm_voice = query_params.get('mllm_voice', constants["MLLM_VOICE"])
+    mllm_language = query_params.get('mllm_language', constants.get("MLLM_LANGUAGE"))
+    mllm_sample_rate = int(query_params.get('mllm_sample_rate', constants.get("MLLM_SAMPLE_RATE", "24000")))
 
-    # Build the mllm block matching the working curl structure
-    mllm_config = {
-        "enable": True,
-        "predefined_tools": ["_publish_message"],
-        "vendor": "gemini",
-        "url": "",
-        "api_key": mllm_api_key,
-        "messages": [
-            {
-                "role": "system",
-                "content": prompt
+    if mllm_vendor == "xai":
+        mllm_params = {
+            "voice": mllm_voice or "eve",
+            "language": mllm_language or constants.get("ASR_LANGUAGE", "en-US")[:2],
+            "sample_rate": mllm_sample_rate,
+        }
+        turn_detection = {
+            "mode": "server_vad",
+            "server_vad_config": {
+                "threshold": 0.7,
+                "prefix_padding_ms": 333,
+                "silence_duration_ms": 200,
             }
-        ],
-        "params": {
+        }
+        output_modalities = ["audio", "text"]
+        if not mllm_url:
+            mllm_url = "wss://api.x.ai/v1/realtime"
+    else:
+        # Default MLLM flow remains Gemini Live.
+        mllm_params = {
             "model": mllm_model,
-            "voice": mllm_voice,
+            "voice": mllm_voice or "Aoede",
             "instructions": prompt
-        },
-        "output_modalities": ["audio", "text"],
-        "max_history": int(max_history),
-        "greeting_message": greeting,
-        "failure_message": failure_message,
-        "turn_detection": {
+        }
+        turn_detection = {
             "mode": "server_vad",
             "server_vad_config": {
                 "prefix_padding_ms": 333,
@@ -653,6 +663,27 @@ def create_mllm_payload(channel, agent_token, prompt, greeting, failure_message,
                 "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH"
             }
         }
+        output_modalities = ["audio", "text"]
+
+    # Build the mllm block matching the working curl structure
+    mllm_config = {
+        "enable": True,
+        "predefined_tools": ["_publish_message"],
+        "vendor": mllm_vendor,
+        "url": mllm_url,
+        "api_key": mllm_api_key,
+        "messages": [
+            {
+                "role": "system",
+                "content": prompt
+            }
+        ],
+        "params": mllm_params,
+        "output_modalities": output_modalities,
+        "max_history": int(max_history),
+        "greeting_message": greeting,
+        "failure_message": failure_message,
+        "turn_detection": turn_detection
     }
 
     # Build properties
@@ -1070,4 +1101,3 @@ class AccessToken007:
         signature = hmac.new(signing, signing_info, sha256).digest()
 
         return '007' + base64.b64encode(zlib.compress(pack_string(signature) + signing_info)).decode('utf-8')
-
