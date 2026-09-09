@@ -83,6 +83,7 @@ def initialize_constants(profile=None):
         "PRIVILEGE_EXPIRE": 24 * 3600,  # 24 hours
         
         # Define LLM settings
+        "LLM_VENDOR": get_env_var('LLM_VENDOR', profile),
         "LLM_URL": get_env_var('LLM_URL', profile),
         "LLM_API_KEY": get_env_var('LLM_API_KEY', profile),
         "LLM_MODEL": get_env_var('LLM_MODEL', profile),
@@ -95,6 +96,7 @@ def initialize_constants(profile=None):
         "TTS_VOICE_STABILITY": get_env_var('TTS_VOICE_STABILITY', profile, "1"),
         "TTS_VOICE_SPEED": get_env_var('TTS_VOICE_SPEED', profile, "0.9"),
         "TTS_VOICE_SAMPLE_RATE": get_env_var('TTS_VOICE_SAMPLE_RATE', profile, "24000"),
+        "TTS_LANGUAGE": get_env_var('TTS_LANGUAGE', profile),
         "TTS_VOICE_INSTRUCTIONS": get_env_var('TTS_VOICE_INSTRUCTIONS', profile,
             "Please use standard American English, natural tone, moderate pace, and steady intonation"),
 
@@ -142,6 +144,9 @@ def initialize_constants(profile=None):
         
         # VAD settings
         "VAD_SILENCE_DURATION_MS": get_env_var('VAD_SILENCE_DURATION_MS', profile, "300"),
+        "VAD_INTERRUPT_DURATION_MS": get_env_var('VAD_INTERRUPT_DURATION_MS', profile, "160"),
+        "VAD_PREFIX_PADDING_MS": get_env_var('VAD_PREFIX_PADDING_MS', profile, "800"),
+        "TURN_DETECTION_MODE": get_env_var('TURN_DETECTION_MODE', profile, "default"),
         
         # Advanced features
         "ENABLE_BHVS": get_env_var('ENABLE_BHVS', profile, "true"),
@@ -395,12 +400,17 @@ def lambda_handler(event, context):
                 voice_instructions = query_params.get('voice_instructions', constants["TTS_VOICE_INSTRUCTIONS"])
 
             # Get LLM parameters
+            llm_vendor = query_params.get('llm_vendor', constants["LLM_VENDOR"])
             llm_url = query_params.get('llm_url', constants["LLM_URL"])
             llm_api_key = query_params.get('llm_api_key', constants["LLM_API_KEY"])
             llm_model = query_params.get('llm_model', constants["LLM_MODEL"])
+            tts_language = query_params.get('tts_language', constants["TTS_LANGUAGE"])
 
             # Get VAD parameters
             vad_silence_duration = query_params.get('vad_silence_duration_ms', constants["VAD_SILENCE_DURATION_MS"])
+            vad_interrupt_duration = query_params.get('vad_interrupt_duration_ms', constants["VAD_INTERRUPT_DURATION_MS"])
+            vad_prefix_padding = query_params.get('vad_prefix_padding_ms', constants["VAD_PREFIX_PADDING_MS"])
+            turn_detection_mode = query_params.get('turn_detection_mode', constants["TURN_DETECTION_MODE"])
 
             # Get advanced features
             enable_bhvs = query_params.get('enable_bhvs', constants["ENABLE_BHVS"]).lower() == "true"
@@ -415,6 +425,7 @@ def lambda_handler(event, context):
                 failure_message=failure_message,
                 max_history=max_history,
                 tts_vendor=tts_vendor,
+                llm_vendor=llm_vendor,
                 llm_url=llm_url,
                 llm_api_key=llm_api_key,
                 llm_model=llm_model,
@@ -424,6 +435,9 @@ def lambda_handler(event, context):
                 deepgram_model=query_params.get('asr_model', constants["ASR_MODEL"]) if asr_vendor == "deepgram" else None,
                 deepgram_language=query_params.get('deepgram_language', constants["DEEPGRAM_LANGUAGE"]) if asr_vendor == "deepgram" else None,
                 vad_silence_duration=vad_silence_duration,
+                vad_interrupt_duration=vad_interrupt_duration,
+                vad_prefix_padding=vad_prefix_padding,
+                turn_detection_mode=turn_detection_mode,
                 enable_bhvs=enable_bhvs,
                 enable_rtm=enable_rtm,
                 enable_aivad=enable_aivad,
@@ -442,7 +456,8 @@ def lambda_handler(event, context):
                 voice_stability=voice_stability if tts_vendor != "rime" else None,
                 voice_speed=voice_speed if tts_vendor != "rime" else None,
                 voice_sample_rate=voice_sample_rate if tts_vendor != "rime" else None,
-                voice_instructions=voice_instructions if tts_vendor != "rime" else None
+                voice_instructions=voice_instructions if tts_vendor != "rime" else None,
+                tts_language=tts_language if tts_vendor != "rime" else None
             )
     except ValueError as e:
         return json_response(400, {"error": str(e)})
@@ -716,14 +731,16 @@ def create_mllm_payload(channel, agent_token, prompt, greeting, failure_message,
 
 
 def create_agent_payload(channel, agent_token, prompt, greeting, failure_message, max_history,
-                        tts_vendor, llm_url, llm_api_key, llm_model,
+                        tts_vendor, llm_vendor, llm_url, llm_api_key, llm_model,
                         asr_vendor, deepgram_url, deepgram_key, deepgram_model, deepgram_language,
                         vad_silence_duration, enable_bhvs, enable_rtm, enable_aivad,
                         idle_timeout, enable_error_message, constants,
                         rime_api_key=None, rime_speaker=None, rime_model_id=None, 
                         rime_lang=None, rime_sampling_rate=None, rime_speed_alpha=None,
                         voice_id=None, voice_stability=None, voice_speed=None,
-                        voice_sample_rate=None, voice_instructions=None):
+                        voice_sample_rate=None, voice_instructions=None, tts_language=None,
+                        vad_interrupt_duration=None, vad_prefix_padding=None,
+                        turn_detection_mode=None):
     """
     Creates the complete agent payload in Agora convoAI format
     
@@ -735,6 +752,7 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         failure_message: The failure message
         max_history: Maximum conversation history
         tts_vendor: TTS vendor (rime, elevenlabs, openai, etc)
+        llm_vendor: LLM vendor
         llm_url: LLM API URL
         llm_api_key: LLM API key
         llm_model: LLM model name
@@ -761,6 +779,10 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         voice_speed: Voice speed for other TTS vendors
         voice_sample_rate: Voice sample rate for other TTS vendors
         voice_instructions: Voice instructions for other TTS vendors
+        tts_language: TTS language code
+        vad_interrupt_duration: Interrupt duration in ms for start_of_speech
+        vad_prefix_padding: Prefix padding in ms for start_of_speech
+        turn_detection_mode: Top-level turn_detection mode (default: "default")
     
     Returns:
         OrderedDict containing the complete agent payload
@@ -831,8 +853,25 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
                 "id": voice_id if voice_id else constants["CARTESIA_VOICE_ID"]
             }
         }
+    elif tts_vendor == "xai":
+        xai_tts_key = constants.get("TTS_KEY") or constants.get("LLM_API_KEY")
+        if not xai_tts_key:
+            raise ValueError("TTS_KEY or LLM_API_KEY is required when TTS_VENDOR=xai")
+        if not voice_id:
+            raise ValueError("TTS_VOICE_ID is required when TTS_VENDOR=xai")
+        tts_config["skip_patterns"] = [5]
+        tts_config["params"] = {
+            "api_key": xai_tts_key,
+            "voice_id": voice_id,
+            "language": (
+                tts_language
+                or constants.get("TTS_LANGUAGE")
+                or (constants.get("ASR_LANGUAGE") or "en-US").split("-")[0].lower()
+            ),
+            "sample_rate": int(voice_sample_rate if voice_sample_rate else constants["TTS_VOICE_SAMPLE_RATE"])
+        }
     else:
-        raise ValueError(f"Unsupported TTS vendor: {tts_vendor}. Supported vendors: rime, elevenlabs, openai, cartesia")
+        raise ValueError(f"Unsupported TTS vendor: {tts_vendor}. Supported vendors: rime, elevenlabs, openai, cartesia, xai")
 
     # Build ASR configuration
     asr_config = {
@@ -864,6 +903,9 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         asr_config["language"] = constants["ASR_LANGUAGE"]
     
     # Build LLM configuration
+    if llm_vendor == "xai" and not llm_url:
+        llm_url = "https://api.x.ai/v1/chat/completions"
+
     llm_config = {
         "url": llm_url,
         "api_key": llm_api_key,
@@ -880,6 +922,8 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
             "model": llm_model
         }
     }
+    if llm_vendor:
+        llm_config["vendor"] = llm_vendor
     
     # Build the complete payload in the Agora convoAI format
     payload_items = []
@@ -902,10 +946,26 @@ def create_agent_payload(channel, agent_token, prompt, greeting, failure_message
         ("idle_timeout", int(idle_timeout)),
         ("llm", llm_config),
         ("turn_detection", {
+            "mode": turn_detection_mode if turn_detection_mode else "default",
             "config": {
+                "start_of_speech": {
+                    "mode": "vad",
+                    "vad_config": {
+                        "interrupt_duration_ms": int(
+                            vad_interrupt_duration if vad_interrupt_duration is not None
+                            else constants["VAD_INTERRUPT_DURATION_MS"]
+                        ),
+                        "prefix_padding_ms": int(
+                            vad_prefix_padding if vad_prefix_padding is not None
+                            else constants["VAD_PREFIX_PADDING_MS"]
+                        )
+                    }
+                },
                 "end_of_speech": {
                     "mode": "semantic" if enable_aivad else "vad",
-                    "silence_duration_ms": int(vad_silence_duration)
+                    "vad_config": {
+                        "silence_duration_ms": int(vad_silence_duration)
+                    }
                 }
             }
         }),
