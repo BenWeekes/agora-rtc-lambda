@@ -1,12 +1,13 @@
 """
-Customer legacy version of launch_agent.py, patched for the Agora
-2026-09-15 turn_detection deprecation.
+Legacy single-file lambda, patched for the Agora 2026-09-15 turn_detection
+deprecation.
 
-This is a snapshot of an older deployment still in use by a customer. It is
-kept here for reference only - it is NOT the current implementation. See
-launch_agent.py at the repo root for the maintained version.
+Reference snapshot of an older deployment shape that is still in the field.
+This is NOT the current implementation - see launch_agent.py at the repo root
+for the maintained version. Kept here so the older payload format has a known
+-good, non-deprecated form to copy from.
 
-Migration applied vs. the customer's original file:
+Migration applied vs. the original file:
   - removed advanced_features.enable_aivad (deprecated)
   - removed properties.vad.* (deprecated)
   - added properties.turn_detection with the new nested structure:
@@ -17,8 +18,11 @@ Migration applied vs. the customer's original file:
     which preserves the previous enable_aivad behaviour.
   - added VAD_INTERRUPT_DURATION_MS / VAD_PREFIX_PADDING_MS / TURN_DETECTION_MODE
     env vars and matching query params.
+  - fixed hangup: POST agents/{agent_id}/leave (was DELETE stop/{agent_id},
+    which returned 404 so agents only ended via idle_timeout).
 
-Everything else is byte-for-byte the customer's original code.
+All configuration is read from environment variables; no credentials here.
+Everything else is unchanged from the original.
 """
 
 import json
