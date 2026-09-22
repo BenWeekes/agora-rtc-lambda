@@ -524,7 +524,7 @@ def hangup_agent(agent_id, constants):
         Dictionary with the status code, response body, and success flag
     """
     # Construct the hangup API URL
-    hangup_api_url = f"{constants['AGENT_API_BASE_URL']}/{constants['APP_ID']}/stop/{agent_id}"
+    hangup_api_url = f"{constants['AGENT_API_BASE_URL']}/{constants['APP_ID']}/agents/{agent_id}/leave"
     
     # Parse the URL to get host and path
     url_parts = urllib.parse.urlparse(hangup_api_url)
@@ -538,7 +538,7 @@ def hangup_agent(agent_id, constants):
         "Authorization": build_auth_header(constants)
     }
     
-    conn.request("DELETE", path, headers=headers)
+    conn.request("POST", path, headers=headers)
     
     # Get the response
     response = conn.getresponse()
